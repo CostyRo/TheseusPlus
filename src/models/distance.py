@@ -6,7 +6,6 @@
 import numpy as np
 # import matplotlib.pyplot as plt
 # import random
-from arch import arch_model
 # import pandas as pd
 import math
 # import pmdarima as pm
@@ -177,7 +176,7 @@ class Mahalanobis:
         '''univariate normal
         '''
         mean = 0
-        sd = np.asscalar(self.cov)
+        sd = np.asarray(self.cov).item()
         var = float(sd)**2
         denom = (2*math.pi*var)**.5
         num = math.exp(-(float(x)-float(mean))**2/(2*var))
@@ -213,8 +212,8 @@ class Mahalanobis:
             if len(X) > 1:
                 prob = self.norm_pdf_multivariate(X-Y)
             elif len(X) == 1: 
-                X = np.asscalar(X)
-                Y = np.asscalar(Y)
+                X = np.asarray(X).item()
+                Y = np.asarray(Y).item()
                 prob = self.normpdf(X-Y)
             else:
                 prob = 1
@@ -258,6 +257,13 @@ class Garch:
         mean = self.mean
         vol = self.vol
         if self.detector != None:
+            try:
+                from arch import arch_model
+            except ImportError as exc:
+                raise ImportError(
+                    "arch is required for the Garch distance measure; install with `theseus[garch]`."
+                ) from exc
+
             self.n_initial_ = self.detector.n_initial_
             self.estimation = self.detector.estimation
             self.X_train = self.detector.X_train_
@@ -633,6 +639,13 @@ class EDRS:
         if vot == False:
             var = np.var(residual)
         else:
+            try:
+                from arch import arch_model
+            except ImportError as exc:
+                raise ImportError(
+                    "arch is required for EDRS with `vol=True`; install with `theseus[garch]`."
+                ) from exc
+
             model = arch_model(10 * residual, mean='Constant', vol='garch', p=1, q=1)
             model_fit = model.fit(disp='off')
             var = model_fit.conditional_volatility/10

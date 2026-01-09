@@ -1,37 +1,11 @@
+import math
 
 import numpy as np
-import math
-import matplotlib.pyplot as plt
-from matplotlib import cm
 import pandas as pd
-from tqdm import tqdm as tqdm
-import time
 from sklearn.preprocessing import MinMaxScaler
-import random
-
-
-import os
-import sys
-module_path = os.path.abspath(os.path.join('../..'))
-if module_path not in sys.path:
-    sys.path.append(module_path)
 
 from src.utils.slidingWindows import find_length
-from src.utils.metrics import metricor
-
-from src.models.distance import Fourier
 from src.models.feature import Window
-from src.models.ocsvm import OCSVM
-from src.models.poly import POLY
-from src.models.pca import PCA
-
-# Uncomment if you want to use NORMA. Please make sure that you unzip the source file 
-# (please follow what is written in norma.txt)
-#from src.models.norma import NORMA
-
-from src.models.matrix_profile import MatrixProfile
-from src.models.lof import LOF
-from src.models.iforest import IForest
 
 def find_section_length(label,length):
     best_i = None
@@ -92,9 +66,14 @@ def generate_data(filepath,init_pos,max_length):
 
 def compute_score(methods,slidingWindow,data,X_data,data_train,data_test,X_train,X_test):
     
+    from src.models.iforest import IForest
+    from src.models.lof import LOF
+    from src.models.ocsvm import OCSVM
+    from src.models.pca import PCA
+    from src.models.poly import POLY
+
     methods_scores = {}
     for method in methods:
-        start_time = time.time()
         if method == 'IForest':
             clf = IForest(n_jobs=1)
             x = X_data
@@ -112,6 +91,8 @@ def compute_score(methods,slidingWindow,data,X_data,data_train,data_test,X_train
             score = np.array([score[0]]*math.ceil((slidingWindow-1)/2) + list(score) + [score[-1]]*((slidingWindow-1)//2))
 
         elif method == 'MatrixProfile':
+            from src.models.matrix_profile import MatrixProfile
+
             clf = MatrixProfile(window = slidingWindow)
             x = data
             clf.fit(x)
@@ -139,6 +120,7 @@ def compute_score(methods,slidingWindow,data,X_data,data_train,data_test,X_train
             clf = POLY(power=3, window = slidingWindow)
             x = data
             clf.fit(x)
+            from src.models.distance import Fourier
             measure = Fourier()
             measure.detector = clf
             measure.set_param()

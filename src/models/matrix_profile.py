@@ -1,7 +1,6 @@
 import numpy as np
-import matrixprofile as mp
 
-class MatrixProfile():
+class MatrixProfile:
     def __init__(self, window = 100):
         self.window = window
         self.model_name = 'MatrixProfile'
@@ -19,11 +18,26 @@ class MatrixProfile():
         self : object
             Fitted estimator.
         """
-        self.profile = mp.compute(X, windows=self.window)
-        # self.decision_scores_ = np.append(self.profile['mp'], np.zeros(self.window - 1))
-        self.decision_scores_ = self.profile['mp']
+        try:
+            import stumpy
+        except ImportError as exc:
+            raise ImportError(
+                "stumpy is required for MatrixProfile; install with `theseus[matrix-profile]`."
+            ) from exc
+
+        X = np.asarray(X, dtype=float)
+        window = int(self.window)
+        if window <= 0:
+            raise ValueError("window must be a positive integer")
+
+        # `stumpy.stump` returns an array whose first column is the matrix profile.
+        self.profile_ = stumpy.stump(X, m=window)
+        self.decision_scores_ = self.profile_[:, 0]
         return self
     
     def top_k_discords(self, k=5):
-        discords = mp.discover.discords(self.profile, exclusion_zone=self.window//2, k=k)
-        return discords['discords']
+        scores = np.asarray(getattr(self, "decision_scores_", []), dtype=float)
+        if scores.size == 0:
+            return []
+        k = max(0, min(int(k), scores.size))
+        return np.argsort(scores)[-k:][::-1].tolist()

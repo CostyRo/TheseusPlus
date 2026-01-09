@@ -1,20 +1,11 @@
-import numpy as np
-
+import ast
 import base64
+import os
 
-import dash
 from dash import dcc
 import dash_bootstrap_components as dbc
 from dash import html
-import plotly.graph_objs as go
-from dash.dependencies import Input, Output, State
-import  pandas as pd
-
-# Plotly import
-import plotly.graph_objs as go
-import os
-import ast
-#from background import *
+import pandas as pd
 
 ########################################################################
 ################################# DATA #################################
@@ -43,23 +34,24 @@ dirname_percentage =  'data/robustness_results/result_data_aggregated_percentage
 
 
 def generate_dict(list_file):
+    list_file = set(list_file)
     all_dict_lag = []
     for file_s in os.listdir(dirname_lag):
         if file_s in list_file:
-            f  = ast.literal_eval(open(dirname_lag+file_s).read()[:-1])
-            all_dict_lag.append(f)
+            with open(os.path.join(dirname_lag, file_s), "r", encoding="utf-8") as file_handle:
+                all_dict_lag.append(ast.literal_eval(file_handle.read().strip()))
 
     all_dict_noise = []
     for file_s in os.listdir(dirname_noise):
         if file_s in list_file:
-            f  = ast.literal_eval(open(dirname_noise+file_s).read()[:-1])
-            all_dict_noise.append(f)
+            with open(os.path.join(dirname_noise, file_s), "r", encoding="utf-8") as file_handle:
+                all_dict_noise.append(ast.literal_eval(file_handle.read().strip()))
 
     all_dict_percentage = []
     for file_s in os.listdir(dirname_percentage):
         if file_s in list_file:
-            f  = ast.literal_eval(open(dirname_percentage+file_s).read()[:-1])
-            all_dict_percentage.append(f)
+            with open(os.path.join(dirname_percentage, file_s), "r", encoding="utf-8") as file_handle:
+                all_dict_percentage.append(ast.literal_eval(file_handle.read().strip()))
     return all_dict_lag,all_dict_noise,all_dict_percentage
 
 
@@ -78,30 +70,20 @@ for list_file_key in all_file_folder.keys():
         all_dict[list_file_key]['noise'] = group_dict(all_dict_noise)
         all_dict[list_file_key]['percentage'] = group_dict(all_dict_percentage)
 
-#global_dataframe = pd.DataFrame(columns=['folder','file_name','measure','type','value'])
 rows_list = []
-for folder in all_dict.keys():
+for folder in all_dict:
     for measure in measures_key:
-        if measure not in ['to_remove']:
-            for i,(lag,noise,ratio) in enumerate(zip(all_dict[folder]['lag'][measure],all_dict[folder]['noise'][measure],all_dict[folder]['percentage'][measure])):
-                    to_append_lag = {'folder': folder,
-                                 'file_name': "{}_{}".format(folder,i),
-                                 'measure': measure,
-                                 'type': 'lag',
-                                 'value': lag}
-                    to_append_noise = {'folder': folder,
-                                 'file_name': "{}_{}".format(folder,i),
-                                 'measure': measure,
-                                 'type': 'noise',
-                                 'value': noise}
-                    to_append_ratio = {'folder': folder,
-                                 'file_name': "{}_{}".format(folder,i),
-                                 'measure': measure,
-                                 'type': 'ratio',
-                                 'value': ratio}
-                    rows_list.append(to_append_lag)
-                    rows_list.append(to_append_noise)
-                    rows_list.append(to_append_ratio)
+        for i,(lag,noise,ratio) in enumerate(
+            zip(
+                all_dict[folder]['lag'][measure],
+                all_dict[folder]['noise'][measure],
+                all_dict[folder]['percentage'][measure],
+            )
+        ):
+            file_name = f"{folder}_{i}"
+            rows_list.append({'folder': folder, 'file_name': file_name, 'measure': measure, 'type': 'lag', 'value': lag})
+            rows_list.append({'folder': folder, 'file_name': file_name, 'measure': measure, 'type': 'noise', 'value': noise})
+            rows_list.append({'folder': folder, 'file_name': file_name, 'measure': measure, 'type': 'ratio', 'value': ratio})
 global_dataframe = pd.DataFrame(rows_list)
 
 ########################################################################
@@ -133,7 +115,7 @@ description = "Detection anomalies in time series have gained ample academic and
 	 \
 	This webpage is grouping all the results and the analysis made"
 
-footer_height = "6rem"
+footer_height = "4.5rem"
 sidebar_width = "20rem"
 table_height = "39rem"
 table_height_2 = "59rem"
@@ -172,7 +154,7 @@ FOOTER_STYLE = {
     "left": 0,
     "right": 0,
     "height": footer_height,
-    "padding": "1rem 1rem",
+    "padding": "0.5rem 1rem",
     "background-color": "rgb(55, 55, 55)",
 }
 
@@ -267,10 +249,10 @@ CONTENT_STYLE_stat = {
 footer = html.Div(
     children = [dbc.Row(
             children=[
-                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_pd.decode()),style={"width" : "210px"}), align="center"),
-                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_lp.decode()),style={"width" : "135px"}), align="center"),
-                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_dn.decode()),style={"width" : "120px"}), align="center"),
-                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_edf.decode()),style={"width" : "50px"}), align="center")
+                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_pd.decode()),style={"height" : "3rem", "width": "auto"}), align="center"),
+                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_lp.decode()),style={"height" : "3rem", "width": "auto"}), align="center"),
+                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_dn.decode()),style={"height" : "3rem", "width": "auto"}), align="center"),
+                dbc.Col(html.Img( src='data:image/png;base64,{}'.format(encoded_image_edf.decode()),style={"height" : "3rem", "width": "auto"}), align="center")
 
         ], className="text-center"),
 

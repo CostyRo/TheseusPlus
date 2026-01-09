@@ -1,0 +1,48 @@
+[project]
+name = "theseusplus"
+version = "0.0.0"
+description = "TheseusPlus: Navigating the Labyrinth of Time Series Anomaly Detection"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+dependencies = [
+  "dash[diskcache]>=3.0",
+  "dash-bootstrap-components>=1.0",
+  "numpy>=1.26",
+  "pandas>=1.5",
+  "plotly>=5.0",
+  "scikit-learn>=1.2",
+  "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7",
+  "ruff>=0.4",
+]
+analysis = [
+  "matplotlib>=3.7",
+  "tqdm>=4.66",
+]
+feature-extraction = [
+  "hurst>=0.0.5",
+  "statsmodels>=0.14",
+  "tsfresh>=0.20",
+]
+garch = [
+  "arch>=6",
+]
+matrix-profile = [
+  "stumpy>=1.12",
+]
+server = [
+  "gunicorn>=21; platform_system != 'Windows'",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

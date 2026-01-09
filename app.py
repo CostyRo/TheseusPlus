@@ -1,44 +1,18 @@
-import pathlib
 import os
-import io
-
-import pandas as pd
-import numpy as np
-import base64
-import json
+from functools import lru_cache
 
 import dash
-from dash import dcc
 import dash_bootstrap_components as dbc
-from dash import html
-import plotly.graph_objs as go
-from dash.dependencies import Input, Output, State
-
-
-from random import shuffle
 import numpy as np
-import math
-import matplotlib.pyplot as plt
-from matplotlib import cm
 import pandas as pd
-from tqdm import tqdm as tqdm
-import time
-from sklearn.preprocessing import MinMaxScaler
-import random
+import plotly.express as px
+import plotly.graph_objs as go
+from dash import DiskcacheManager, Input, Output, State, dash_table, dcc, html
 
-
-import sys
-from src.utils.slidingWindows import find_length
-from src.utils.metrics import metricor
-from src.models.distance import Fourier
-from src.models.feature import Window
-from src.analysis.score_computation import generate_data
-
-import constants
-#from navbar import sand_paper_navbar
-from navbar import *
 from layout_tools import *
-from dash.long_callback import DiskcacheLongCallbackManager
+from navbar import *
+from src.analysis.score_computation import generate_data
+from src.utils.metrics import metricor
 
 external_stylesheets = [
 	{
@@ -46,54 +20,67 @@ external_stylesheets = [
 		'rel': 'stylesheet',
 		'integrity': 'sha384-50oBUHEmvpQ+1lW4y57PTFmhCaXp0ML5d60M1M7uH2+nqUivzIebhndOJK28anvf',
 		'crossorigin': 'anonymous'
-	},dbc.themes.BOOTSTRAP
+	},
+	{
+		'href': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css',
+		'rel': 'stylesheet',
+	},
+	dbc.themes.BOOTSTRAP,
 ]
 
 import diskcache
 cache = diskcache.Cache("./cache")
-long_callback_manager = DiskcacheLongCallbackManager(cache)
+background_callback_manager = DiskcacheManager(cache)
 
-# app initialize
+
 app = dash.Dash(
 	__name__,
 	meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1.0"}],
-	external_stylesheets=external_stylesheets,long_callback_manager=long_callback_manager
+	external_stylesheets=external_stylesheets,
+	background_callback_manager=background_callback_manager,
+	suppress_callback_exceptions=True,
+	title="TheseusPlus",
 )
-app.css.append_css({'external_url': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css'}) #fontawesome
-server = app.server
-app.config["suppress_callback_exceptions"] = True
 
 
-#################################################################################
-########################## ADD LOCAL CSS OR JAVASCRIPT ##########################
-#################################################################################
-
-css_directory = os.getcwd()
-assets= "assets/"
-locals = [assets+'loader.css']
-static_css_route = '/static/'
-
-@app.server.route('{}<stylesheet>'.format(static_css_route))
-def serve_stylesheet(locals):
-	if stylesheet not in locals:
-		raise Exception(
-			'"{}" is excluded from the allowed static files'.format(
-				stylesheet
-			)
-		)
-	return flask.send_from_directory(css_directory, stylesheet)
-
-for local in locals:
-	if ".css" in local:
-		app.css.append_css({"external_url": "/static/{}".format(local)})
-	if ".js" in local:
-		app.scripts.append_script({'external_url': "/static/{}".format(local)})
+@lru_cache(maxsize=None)
+def _load_merged_table(measure):
+	return pd.read_csv(f"data/mergedTable_{measure}.csv")
 
 
+def _filter_benchmark_df(df_in, dataset, anoma_type, ts_type):
+	df_out = df_in
+	if dataset not in (None, "ALL"):
+		df_out = df_out.loc[df_out["dataset"] == dataset]
+	if anoma_type not in (None, "ALL"):
+		df_out = df_out.loc[df_out["type_an"] == anoma_type]
+	if ts_type == "single":
+		df_out = df_out.loc[df_out["nb_anomaly"] == 1.0]
+	elif ts_type == "multiple":
+		df_out = df_out.loc[df_out["nb_anomaly"] > 1.0]
+	return df_out
 
-########################################################################
-############################## LAYOUT ##################################
-########################################################################
+
+def _resolve_paths(dataset_folder, filename):
+	folder = dataset_folder
+	if "NASA_" in folder:
+		folder = folder.replace("NASA_", "NASA-")
+		ts_name = filename.replace("SMAP", "").replace("_data.out", ".test.out")
+	else:
+		ts_name = filename.replace(".txt", ".out")
+
+	ts_path = os.path.join(path_top_dataseries, folder, ts_name)
+	scores_dir = os.path.join(path_top_anoamly_score, folder)
+	return folder, ts_name, ts_path, scores_dir
+
+
+def _normalize_scores(scores):
+	scores = np.asarray(scores, dtype=float)
+	denom = scores.max() - scores.min()
+	if denom == 0:
+		return scores
+	return (scores - scores.min()) / denom
+
 
 base_layout = html.Div([
 	dcc.Location(id="url"), 
@@ -102,13 +89,9 @@ base_layout = html.Div([
 	footer,
 	],
 )
-
-
 app.layout = base_layout
 
-########################################################################
-############################## CALLBACK ################################
-########################################################################
+
 
 @app.callback(
 	[Output(f"page-{i}-link", "active") for i in range(1, 7)],
@@ -137,12 +120,13 @@ def render_page_content(pathname):
 		return generate_page_6()
 		
 	# If the user tries to reach a different page, return a 404 message
-	return dbc.Jumbotron(
+	return dbc.Container(
 		[
 			html.H1("404: Not found", className="text-danger"),
 			html.Hr(),
 			html.P(f"The pathname {pathname} was not recognised..."),
-		]
+		],
+		className="p-5",
 	)
 
 
@@ -176,7 +160,6 @@ app.callback(
 
 def add_rect(label,data):
 	anom_plt = [None]*len(data)
-	ts_plt = data.copy()
 	len_ts = len(data)
 	for i,lab in enumerate(label):
 		if lab == 1:
@@ -189,41 +172,32 @@ def add_rect(label,data):
 	[Output('stat_ts_place', 'children'),
 	Output('ts_place', 'children')], 
 	[Input('accuracy_tbl', 'active_cell'),Input('accuracy_tbl', 'data')])
-def update_graphs(active_cell,data_cell):
+def update_page1_timeseries_graphs(active_cell,data_cell):
 	if active_cell:
-		folder = df.loc[df['filename']==data_cell[active_cell['row']]['filename']]['dataset'].values[0]
-		if 'NASA_' in folder:
-			folder = folder.replace('NASA_','NASA-')
-			path = path_top_dataseries + folder + '/' + data_cell[active_cell['row']]['filename'].replace("SMAP", "").replace('_data.out','.test.out')
-			path_anom = path_top_anoamly_score + folder + '/{}/score/' + data_cell[active_cell['row']]['filename'].replace("SMAP", "").replace('_data.out','.test.out')
-		else:
-			path = path_top_dataseries + folder + '/' + data_cell[active_cell['row']]['filename'].replace(".txt", ".out")
-			path_anom = path_top_anoamly_score + folder + '/{}/score/' + data_cell[active_cell['row']]['filename'].replace(".txt", ".out")
-		ts = pd.read_csv(path + '.zip',compression='zip', header=None).to_numpy()
-		
-		
+		row = data_cell[active_cell['row']]
+		filename = row["filename"]
+		dataset_folder = df.loc[df["filename"] == filename]["dataset"].values[0]
+		_, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, filename)
 
-
-
-		
+		ts = pd.read_csv(ts_path + ".zip", compression="zip", header=None).to_numpy()
 
 		label = ts[:,1]
 		data = ts[:,0].astype(float)
+		x = list(range(len(data)))
 
 		scores = {}
-		for method_name in os.listdir(path_top_anoamly_score + folder + '/'):
-			if (method_name in methods_key) and (os.path.isfile(path_anom.format(method_name)+ '.zip')):
-				print('found {}'.format(method_name))
-				scores_tmp = pd.read_csv(path_anom.format(method_name)+ '.zip',compression='zip', header=None).to_numpy()
+		for method_name in methods_key:
+			score_zip = os.path.join(scores_dir, method_name, "score", ts_name) + ".zip"
+			if os.path.isfile(score_zip):
+				scores_tmp = pd.read_csv(score_zip, compression="zip", header=None).to_numpy()
 				scores[method_name] = scores_tmp[:,0].astype(float)
 		
 		
 
-		#fig = px.line(data)
 		anom = add_rect(label,data)
 		trace_scores = []
 		trace_scores.append(go.Scattergl(
-			x=list(range(len(data))),
+			x=x,
 			y=data,
 			xaxis='x',
 			yaxis='y2',
@@ -233,7 +207,7 @@ def update_graphs(active_cell,data_cell):
 			opacity = 1
 		))
 		trace_scores.append(go.Scattergl(
-			x=list(range(len(data))),
+			x=x,
 			y=anom,
 			xaxis='x',
 			yaxis='y2',
@@ -245,7 +219,7 @@ def update_graphs(active_cell,data_cell):
 
 		for method_name in scores.keys():
 			trace_scores.append(go.Scattergl(
-				x=list(range(len(data))),
+				x=x,
 				y=[0] + list(scores[method_name][1:-1]) + [0],
 				name = "{} score".format(method_name),
 				opacity = 1,
@@ -265,7 +239,7 @@ def update_graphs(active_cell,data_cell):
 				range=[min(data),max(data)]
 			),
 			#showlegend=False,
-			title="{} time series snippet (40k points maximum)".format(data_cell[active_cell['row']]['filename'].split(".")[0]),
+			title="{} time series snippet (40k points maximum)".format(filename.split(".")[0]),
 			template="simple_white",
 			margin=dict(l=8, r=4, t=50, b=10),
 			height=375,
@@ -277,13 +251,14 @@ def update_graphs(active_cell,data_cell):
 
 		fig = dict(data=trace_scores, layout=layout)
 
-		#fig.update_layout(hoverdistance=1)
-		to_plot = df.loc[df['filename']==data_cell[active_cell['row']]['filename']][methods_key].mean()
+		to_plot = pd.DataFrame(
+			{"method": methods_key, "value": [row[method_name] for method_name in methods_key]}
+		)
 
-		fig_bar = px.bar(to_plot,labels={
+		fig_bar = px.bar(to_plot,x="method", y="value", labels={
 					 "value": "{}".format('Accuracy'),
-					 "index": "{}".format('AD methods'),
-				 },title="{} on {} time series".format('Accuracy',data_cell[active_cell['row']]['filename'].split(".")[0]))
+					 "method": "{}".format('AD methods'),
+				 },title="{} on {} time series".format('Accuracy',filename.split(".")[0]))
 		fig_bar.update_layout(showlegend=False,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=375)
 
 
@@ -298,37 +273,15 @@ def update_graphs(active_cell,data_cell):
 	Input('measure_select_page_1', 'value'),
 	Input('type_anom_select_page_1', 'value'),
 	Input('type_ts_select_page_1', 'value'),])
-def update_graphs(dataset,measure,anoma_type,ts_type):
-	global df
-	df_new = df
-	
-	if measure is not None:
-		df_new = pd.read_csv('data/mergedTable_{}.csv'.format(measure))
-
-	if dataset == 'ALL':
-		df_new = df_new
-	elif dataset is not None:
-		df_new = df_new.loc[df_new['dataset'] == dataset]
-
-	if anoma_type == 'ALL':
-		df_new = df_new
-	elif anoma_type is not None:
-		df_new = df_new.loc[df_new['type_an'] == anoma_type]
-
-	if ts_type == 'ALL':
-		df_new = df_new
-	elif ts_type == 'single':
-		df_new = df_new.loc[df_new['nb_anomaly'] == 1.0]
-	elif ts_type == 'multiple':
-		df_new = df_new.loc[df_new['nb_anomaly'] > 1.0]
-	df_new = df_new[['filename']+methods_key]
-	df_new = df_new.round(3)
-
+def update_page1_overview_table(dataset,measure,anoma_type,ts_type):
+	df_new = _load_merged_table(measure) if measure is not None else df
+	df_new = _filter_benchmark_df(df_new, dataset, anoma_type, ts_type)
+	df_new = df_new[['filename']+methods_key].round(3)
 
 	if dataset is None: dataset = 'ALL'
-	if measure is None: measure = 'AUC-ROC'
+	if measure is None: measure = 'AUC_PR'
 	if anoma_type is None: anoma_type = 'ALL'
-	to_plot = df_new[methods_key] 
+	to_plot = df_new[methods_key]
 	fig = px.box(to_plot[to_plot.median().sort_values(ascending=True).index],labels={
 					 "value": "{}".format(measure),
 					 "variable": "{}".format('AD methods'),
@@ -350,155 +303,119 @@ def update_graphs(dataset,measure,anoma_type,ts_type):
 	Input('measure_select_page_2', 'value'),
 	Input('type_anom_select_page_2', 'value'),
 	Input('type_ts_select_page_2', 'value'),])
-def update_comp(methodX,methodY,dataset,measure,anoma_type,ts_type):
-	global df
-	df_new = df
+def update_page2_comparison(methodX,methodY,dataset,measure,anoma_type,ts_type):
+	if methodX in (None, 'ALL') or methodY in (None, 'ALL'):
+		return None,None
 
-	if measure is not None:
-		df_new = pd.read_csv('data/mergedTable_{}.csv'.format(measure))
+	df_new = _load_merged_table(measure) if measure is not None else df
+	df_new = _filter_benchmark_df(df_new, dataset, anoma_type, ts_type)
+	df_new = df_new[['filename','dataset']+methods_key]
 
-	if (methodX is not None) and (methodY is not None):
-		if dataset == 'ALL':
-			df_new = df_new
-		elif dataset is not None:
-			df_new = df_new.loc[df_new['dataset'] == dataset]
+	if dataset is None: dataset = 'ALL'
+	if measure is None: measure = 'AUC_PR'
+	if anoma_type is None: anoma_type = 'ALL'
 
-		if anoma_type == 'ALL':
-			df_new = df_new
-		elif anoma_type is not None:
-			df_new = df_new.loc[df_new['type_an'] == anoma_type]
-
-		if ts_type == 'ALL':
-			df_new = df_new
-		elif ts_type == 'single':
-			df_new = df_new.loc[df_new['nb_anomaly'] == 1.0]
-		elif ts_type == 'multiple':
-			df_new = df_new.loc[df_new['nb_anomaly'] > 1.0]
-		df_new = df_new[['filename','dataset']+methods_key]
-		#df_new = df_new.round(3)
-
-
-		if dataset is None: dataset = 'ALL'
-		if measure is None: measure = 'AUC-ROC'
-		if anoma_type is None: anoma_type = 'ALL'
-		to_plot = df_new[[methodX,methodY,'dataset','filename']] 
-		fig = px.box(to_plot[[methodX,methodY]],labels={
-						 "value": "{}".format(measure),
-						 "variable": "{}".format('methods'),
-					 },title="Average {} on {} time series ({})".format(measure,dataset,anoma_type))
-		fig.update_layout(showlegend=False,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=375)
-		
-		fig_scatter = px.scatter(to_plot,x=methodX, y=methodY,color='dataset',hover_name='filename',marginal_x='histogram', marginal_y='histogram')
-		fig_scatter.update_traces(
-			marker=dict(size=8,
-			line=dict(width=1,
-			color='DarkSlateGrey')),
-			selector=dict(mode='markers'))
-		#fig_scatter.add_trace(go.Scatter(x=to_plot[methodX], y=to_plot[methodY],
-		#	mode='markers',name='markers')
-		#)
-		fig_scatter.add_trace(go.Scatter(x=[0,1], y=[0,1],
-			mode='lines',name='equality lines',line=dict(width=2,color='black'))
-		)
-		
-		fig_scatter.update_yaxes(rangemode="tozero")
-		fig_scatter.update_xaxes(rangemode="tozero")
-		fig_scatter.update_layout(template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=675)
-		return [dcc.Graph(figure=fig,id='boxplot_page_2')],[dcc.Graph(figure=fig_scatter,id='scatter_page_2')]
-	return None,None
+	to_plot = df_new[[methodX,methodY,'dataset','filename']]
+	fig = px.box(to_plot[[methodX,methodY]],labels={
+					 "value": "{}".format(measure),
+					 "variable": "{}".format('methods'),
+				 },title="Average {} on {} time series ({})".format(measure,dataset,anoma_type))
+	fig.update_layout(showlegend=False,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=375)
+	
+	fig_scatter = px.scatter(to_plot,x=methodX, y=methodY,color='dataset',hover_name='filename',marginal_x='histogram', marginal_y='histogram')
+	fig_scatter.update_traces(
+		marker=dict(size=8,
+		line=dict(width=1,
+		color='DarkSlateGrey')),
+		selector=dict(mode='markers'))
+	fig_scatter.add_trace(go.Scatter(x=[0,1], y=[0,1],
+		mode='lines',name='equality lines',line=dict(width=2,color='black'))
+	)
+	
+	fig_scatter.update_yaxes(rangemode="tozero")
+	fig_scatter.update_xaxes(rangemode="tozero")
+	fig_scatter.update_layout(template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=675)
+	return [dcc.Graph(figure=fig,id='boxplot_page_2')],[dcc.Graph(figure=fig_scatter,id='scatter_page_2')]
 
 
 @app.callback(Output('ts_place_comp','children'),
 	[Input('scatter_page_2','clickData'),
 	Input('methodX_select_page_2', 'value'),
 	Input('methodY_select_page_2', 'value'),])
-def display_hover_point(clickData,methodX,methodY):
-	if (methodX is not None) and (methodY is not None):
-		if (clickData is not None):
-			folder = df.loc[df['filename']==clickData['points'][0]["hovertext"]]['dataset'].values[0]
-			
-			if 'NASA_' in folder:
-				folder = folder.replace('NASA_','NASA-')
-				path = path_top_dataseries + folder + '/' + clickData['points'][0]["hovertext"].replace("SMAP", "").replace('_data.out','.test.out')
-				path_anom = path_top_anoamly_score + folder + '/{}/score/' + clickData['points'][0]["hovertext"].replace("SMAP", "").replace('_data.out','.test.out')
-			else:
-				path = path_top_dataseries + folder + '/' + clickData['points'][0]["hovertext"].replace(".txt", ".out")
-				path_anom = path_top_anoamly_score + folder + '/{}/score/' + clickData['points'][0]["hovertext"].replace(".txt", ".out")
-			ts = pd.read_csv(path+ '.zip',compression='zip', header=None).to_numpy()
+def update_page2_timeseries_on_click(clickData,methodX,methodY):
+	if clickData is None or methodX in (None, 'ALL') or methodY in (None, 'ALL'):
+		return None
 
-			
-			label = ts[:,1]
-			data = ts[:,0].astype(float)
-			fig = go.Figure()
-			
-			scores = {}
-			for method_name in os.listdir(path_top_anoamly_score + folder + '/'):
-				if (method_name in [methodX,methodY]) and (os.path.isfile(path_anom.format(method_name)+ '.zip')):
-					print('found {}'.format(method_name))
-					scores_tmp = pd.read_csv(path_anom.format(method_name)+ '.zip',compression='zip', header=None).to_numpy()
-					scores[method_name] = scores_tmp[:,0].astype(float)
-			
-			
+	filename = clickData['points'][0]["hovertext"]
+	dataset_folder = df.loc[df['filename']==filename]['dataset'].values[0]
+	_, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, filename)
 
-			#fig = px.line(data)
-			anom = add_rect(label,data)
-			trace_scores = []
-			trace_scores.append(go.Scattergl(
-				x=list(range(len(data))),
-				y=data,
-				xaxis='x',
-				yaxis='y2',
-				name = "Time series",
-				mode = 'lines',
-				line = dict(color = 'blue',width=3),
-				opacity = 1
-			))
-			trace_scores.append(go.Scattergl(
-				x=list(range(len(data))),
-				y=anom,
-				xaxis='x',
-				yaxis='y2',
-				name = "Anomalies",
-				mode = 'lines',
-				line = dict(color = 'red',width=3),
-				opacity = 1
-			))
+	ts = pd.read_csv(ts_path + ".zip",compression='zip', header=None).to_numpy()
+	label = ts[:,1]
+	data = ts[:,0].astype(float)
+	x = list(range(len(data)))
 
-			for method_name in scores.keys():
-				trace_scores.append(go.Scattergl(
-					x=list(range(len(data))),
-					y=[0] + list(scores[method_name][1:-1]) + [0],
-					name = "{} score".format(method_name),
-					opacity = 1,
-					mode = 'lines',
-					fill="tozeroy",
-				))
+	scores = {}
+	for method_name in (methodX, methodY):
+		score_zip = os.path.join(scores_dir, method_name, "score", ts_name) + ".zip"
+		if os.path.isfile(score_zip):
+			scores_tmp = pd.read_csv(score_zip,compression='zip', header=None).to_numpy()
+			scores[method_name] = scores_tmp[:,0].astype(float)
 
+	anom = add_rect(label,data)
+	trace_scores = []
+	trace_scores.append(go.Scattergl(
+		x=x,
+		y=data,
+		xaxis='x',
+		yaxis='y2',
+		name = "Time series",
+		mode = 'lines',
+		line = dict(color = 'blue',width=3),
+		opacity = 1
+	))
+	trace_scores.append(go.Scattergl(
+		x=x,
+		y=anom,
+		xaxis='x',
+		yaxis='y2',
+		name = "Anomalies",
+		mode = 'lines',
+		line = dict(color = 'red',width=3),
+		opacity = 1
+	))
 
+	for method_name in scores.keys():
+		trace_scores.append(go.Scattergl(
+			x=x,
+			y=[0] + list(scores[method_name][1:-1]) + [0],
+			name = "{} score".format(method_name),
+			opacity = 1,
+			mode = 'lines',
+			fill="tozeroy",
+		))
 
-			layout = go.Layout(
-				yaxis=dict(
-					domain=[0, 0.4],
-					range=[0,1]
-				),
-				yaxis2=dict(
-					domain=[0.45, 1],
-					range=[min(data),max(data)]
-				),
-				#showlegend=False,
-				title="{} time series snippet (40k points maximum)".format(clickData['points'][0]["hovertext"].split(".")[0]),
-				template="simple_white",
-				margin=dict(l=8, r=4, t=50, b=10),
-				height=375,
-				hovermode="x unified",
-				xaxis=dict(
-					range=[0,len(data)]
-				)
-			)
+	layout = go.Layout(
+		yaxis=dict(
+			domain=[0, 0.4],
+			range=[0,1]
+		),
+		yaxis2=dict(
+			domain=[0.45, 1],
+			range=[min(data),max(data)]
+		),
+		title="{} time series snippet (40k points maximum)".format(filename.split(".")[0]),
+		template="simple_white",
+		margin=dict(l=8, r=4, t=50, b=10),
+		height=375,
+		hovermode="x unified",
+		xaxis=dict(
+			range=[0,len(data)]
+		)
+	)
 
-			fig = dict(data=trace_scores, layout=layout)
-			
-			return [dcc.Graph(figure=fig,id='ts_place_2',style={'width': '100%'})]
+	fig = dict(data=trace_scores, layout=layout)
+	return [dcc.Graph(figure=fig,id='ts_place_2',style={'width': '100%'})]
 
 
 
@@ -511,32 +428,21 @@ def display_hover_point(clickData,methodX,methodY):
 	Input('exp_select_page_3', 'value'),
 	Input('type_plot_page_3', 'value')
 	])
-def update_graphs(dataset,exp,plot_type):
-	global global_dataframe
+def update_page3_robustness_summary(dataset,exp,plot_type):
 	df_new = global_dataframe
-	if dataset == 'ALL':
-		df_new = df_new
-	elif dataset is not None:
+	if dataset not in (None, 'ALL'):
 		df_new = df_new.loc[df_new['folder'] == dataset]
 
-	if exp == 'noise':
-		df_new = df_new.loc[df_new['type'] == 'noise']
-	elif exp == 'lag':
-		df_new = df_new.loc[df_new['type'] == 'lag']
-	elif exp == 'ratio':
-		df_new = df_new.loc[df_new['type'] == 'ratio']
-
+	if exp in ('noise', 'lag', 'ratio'):
+		df_new = df_new.loc[df_new['type'] == exp]
 
 	if exp is None:
 		exp = 'lag,noise, and ratio'
 	if dataset is None:
 		dataset = 'ALL'
-	#df_new = df_new[['filename']+methods_key]
 	df_new = df_new.round(3)
-
-
 	to_plot = df_new
-	
+
 	if plot_type is None:
 		plot_type = 'boxplot'
 
@@ -577,19 +483,12 @@ def generate_new_label(label,lag):
 		return np.array(list(label[-lag:]) + [0]*(-lag))
 	elif lag > 0:
 		return np.array([0]*lag + list(label[:-lag]))
-	elif lag == 0:
-		return label
+	return label
 
-def generate_curve(label,score,slidingWindow):
-	tpr_3d, fpr_3d, prec_3d, window_3d, avg_auc_3d, avg_ap_3d = metricor().RangeAUC_volume(labels_original=label, score=score, windowSize=1*slidingWindow)
-
-	#X = np.array(tpr_3d).reshape(1,-1).ravel()
-	#X_ap = np.array(tpr_3d)[:,:-1].reshape(1,-1).ravel()
-	#Y = np.array(fpr_3d).reshape(1,-1).ravel()
-	#W = np.array(prec_3d).reshape(1,-1).ravel()
-	#Z = np.repeat(window_3d, len(tpr_3d[0]))
-	#Z_ap = np.repeat(window_3d, len(tpr_3d[0])-1)
-	
+def generate_curve(grader,label,score,slidingWindow):
+	_, _, _, _, avg_auc_3d, avg_ap_3d = grader.RangeAUC_volume(
+		labels_original=label, score=score, windowSize=slidingWindow
+	)
 	return avg_auc_3d, avg_ap_3d
 
 @app.callback(
@@ -605,42 +504,20 @@ def generate_curve(label,score,slidingWindow):
 		Input('method_select_page_3', 'value'),
 		Input('condition_custom_page_3', 'value')
 	],)
-	#progress=[
-	#	Output("progress_bar", "value"), 
-	#	Output("progress_bar", "max")
-	#],prevent_initial_call=True)
 def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom):
-	#global global_dataframe
-	global df
-
-
 	if (condition_custom is not None) and (time_series is not None) and (method is not None) and (exp is not None) and (plot_type is not None):
-		##### get data
+		dataset_folder = df.loc[df['filename']==time_series]['dataset'].values[0]
+		_, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, time_series)
 
-		folder = df.loc[df['filename']==time_series]['dataset'].values[0]
-
-		if 'NASA_' in folder:
-			folder = folder.replace('NASA_','NASA-')
-			path = path_top_dataseries + folder + '/' + time_series.replace("SMAP", "").replace('_data.out','.test.out')
-			path_anom = path_top_anoamly_score + folder + '/{}/score/' + time_series.replace("SMAP", "").replace('_data.out','.test.out')
-		else:
-			path = path_top_dataseries + folder + '/' + time_series.replace(".txt", ".out")
-			path_anom = path_top_anoamly_score + folder + '/{}/score/' + time_series.replace(".txt", ".out")
-		
-		ts = pd.read_csv(path+ '.zip',compression='zip', header=None).to_numpy()
-
-		
-
+		ts = pd.read_csv(ts_path+ '.zip',compression='zip', header=None).to_numpy()
 		label = ts[:,1]
 		data = ts[:,0].astype(float)
-		fig = go.Figure()
-		
-		scores = pd.read_csv(path_anom.format(method)+ '.zip',compression='zip', header=None).to_numpy()
-		scores = scores[:,0].astype(float)
-		
-		##### compute Exp
+		x = list(range(len(data)))
 
-		pos_first_anom,slidingWindow,_,_,_,_,_,_,_ = generate_data(path+ '.zip',0,max_length=10000)
+		score_zip = os.path.join(scores_dir, method, "score", ts_name) + ".zip"
+		scores = pd.read_csv(score_zip,compression='zip', header=None).to_numpy()[:,0].astype(float)
+
+		_, slidingWindow, *_ = generate_data(ts_path+ '.zip',0,max_length=10000)
 
 		dict_acc = {
 				'R_AUC_ROC':      {},
@@ -661,62 +538,51 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 			lag_range = list(range(-slidingWindow//4,slidingWindow//4,5))
 		elif exp == 'noise':	
 			lag_range = [0.01,0.02,0.05,0.07,0.1,0.12,0.15,0.17,0.2]
+		else:
+			return None,None,None
 
-		for iter_lag,lag in enumerate(lag_range):
-			print(iter_lag)
-		
+		grader = metricor()
+		scores_by_lag = {}
+
+		for lag in lag_range:
 			if exp == 'lag':
 				new_label = generate_new_label(label,lag)
 				new_scores = scores
-			elif exp == 'noise':
+			else:
 				new_label = label
 				noise = np.random.normal(-lag,lag,len(scores))
-				new_scores = np.array(scores) + noise
-				new_scores = (new_scores - min(new_scores))/(max(new_scores) - min(new_scores))
+				new_scores = _normalize_scores(scores + noise)
+				scores_by_lag[lag] = new_scores
 
-			grader = metricor()  
-
-			R_AUC, R_AP, R_fpr, R_tpr, R_prec = grader.RangeAUC(labels=new_label, score=new_scores, window=slidingWindow, plot_ROC=True) 
-			L, fpr, tpr= grader.metric_new(new_label, new_scores, plot_ROC=True)
-			precision, recall, AP = grader.metric_PR(new_label, new_scores)
-			avg_auc_3d, avg_ap_3d = generate_curve(new_label,new_scores,2*slidingWindow)
-			L1 = [ elem for elem in L]
+			R_AUC, R_AP, *_ = grader.RangeAUC(labels=new_label, score=new_scores, window=slidingWindow, plot_ROC=True) 
+			L = grader.metric_new(new_label, new_scores)
+			_, _, AP = grader.metric_PR(new_label, new_scores)
+			avg_auc_3d, avg_ap_3d = generate_curve(grader,new_label,new_scores,2*slidingWindow)
 
 			dict_acc['R_AUC_ROC'][lag] 		=R_AUC
-			dict_acc['AUC_ROC'][lag]        =L1[0]
+			dict_acc['AUC_ROC'][lag]        =L[0]
 			dict_acc['R_AUC_PR'][lag]       =R_AP
 			dict_acc['AUC_PR'][lag]         =AP
 			dict_acc['VUS_ROC'][lag]        =avg_auc_3d
 			dict_acc['VUS_PR'][lag]         =avg_ap_3d
-			dict_acc['Precision'][lag]      =L1[1]
-			dict_acc['Recall'][lag]         =L1[2]
-			dict_acc['F'][lag]              =L1[3]
-			dict_acc['Precision@k'][lag]    =L1[9]
-			dict_acc['Rprecision'][lag]     =L1[7]
-			dict_acc['Rrecall'][lag]        =L1[4]
-			dict_acc['RF'][lag]             =L1[8]
-
-				#set_progress((str(iter_lag + 1), str(len(lag_range))))
+			dict_acc['Precision'][lag]      =L[1]
+			dict_acc['Recall'][lag]         =L[2]
+			dict_acc['F'][lag]              =L[3]
+			dict_acc['Precision@k'][lag]    =L[9]
+			dict_acc['Rprecision'][lag]     =L[7]
+			dict_acc['Rrecall'][lag]        =L[4]
+			dict_acc['RF'][lag]             =L[8]
 
 			
-
-		#elif exp == 'noise':
-
-		#elif exp == 'ratio':
-
-	
 		##### stat plot
 
 		dict_acc_df = pd.DataFrame(dict_acc)[pd.DataFrame(dict_acc).std().sort_values(ascending=False).index]
-		#if plot_type == 'boxplot':
 		fig_box = px.box(dict_acc_df,labels={
 			"value": "{}".format("value"),"variable": "{}".format('Accuracy measures')})
 		fig_box.update_layout(showlegend=False,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=230)
-		#elif plot_type == 'evolution':
 		fig_box_evo = px.line(dict_acc_df,markers=True,labels={
 			"value": "{}".format("value"),"index": "{} injected".format(exp)})
 		fig_box_evo.update_layout(showlegend=True,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=460,hovermode="x unified")
-		#elif plot_type == 'std':
 		fig_bar = px.bar(dict_acc_df.std(),labels={
 			"value": "{}".format("standard deviation"),"index": "{}".format('Accuracy measures')})
 		fig_bar.update_layout(showlegend=False,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=230,)
@@ -745,7 +611,7 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 		anom = add_rect(label,data)
 		trace_scores = []
 		trace_scores.append(go.Scattergl(
-			x=list(range(len(data))),
+			x=x,
 			y=data,
 			xaxis='x',
 			yaxis='y2',
@@ -755,7 +621,7 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 			opacity = 1
 		))
 		trace_scores.append(go.Scattergl(
-			x=list(range(len(data))),
+			x=x,
 			y=anom,
 			xaxis='x',
 			yaxis='y2',
@@ -770,10 +636,9 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 			for i,lag in enumerate(lag_range):
 				if (i == 0) or (i == len(lag_range)-1):
 					trace_scores.append(go.Scattergl(
-						x=list(range(len(data))),
+						x=x,
 						y=[0]*abs(min(lag,0))+ [0] + list(scores[1+max(lag,0):-1-abs(min(lag,0))]) + [0] + [0]*max(lag,0),
 						name = "{} with {} lag".format(method,lag),
-						#opacity = 1,
 						line = dict(color = 'black'),
 						mode = 'lines',
 						fill="tozeroy",
@@ -781,10 +646,9 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 					))
 				else:
 					trace_scores.append(go.Scattergl(
-						x=list(range(len(data))),
+						x=x,
 						y=[0]*abs(min(lag,0))+ [0] + list(scores[1+max(lag,0):-1-abs(min(lag,0))]) + [0] + [0]*max(lag,0),
 						name = "{} with {} lag".format(method,lag),
-						#opacity = 1,
 						line = dict(color = 'rgba(26,150,65,0.1)'),
 						mode = 'lines',
 						fill="tozeroy",
@@ -792,15 +656,15 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 					))
 		elif exp == 'noise':
 			for i,lag in enumerate(lag_range):
-				noise = np.random.normal(-lag,lag,len(scores))
-				new_scores = np.array(scores) + noise
-				new_scores = (new_scores - min(new_scores))/(max(new_scores) - min(new_scores))
+				new_scores = scores_by_lag.get(lag)
+				if new_scores is None:
+					noise = np.random.normal(-lag,lag,len(scores))
+					new_scores = _normalize_scores(scores + noise)
 				if (i == 0) or (i == len(lag_range)-1):
 					trace_scores.append(go.Scattergl(
-						x=list(range(len(data))),
+						x=x,
 						y=[0] + list(new_scores[1:-1]) + [0],
-						name = "{} with {} lag".format(method,lag),
-						#opacity = 1,
+						name = "{} with {} noise".format(method,lag),
 						line = dict(color = 'black'),
 						mode = 'lines',
 						fill="tozeroy",
@@ -808,10 +672,9 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 					))
 				else:
 					trace_scores.append(go.Scattergl(
-						x=list(range(len(data))),
+						x=x,
 						y=[0] + list(new_scores[1:-1]) + [0],
-						name = "{} with {} lag".format(method,lag),
-						#opacity = 1,
+						name = "{} with {} noise".format(method,lag),
 						line = dict(color = 'rgba(26,150,65,0.1)'),
 						mode = 'lines',
 						fill="tozeroy",
@@ -849,10 +712,5 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 		return title,col_box, ts_plot
 	return None,None,None
 
-########################################################################
-########################################################################
-########################################################################
-
-# Running the server
 if __name__ == "__main__":
-	app.run_server(debug=True)
+	app.run(debug=True)

@@ -3,43 +3,12 @@
 """
 # Author: Yinchen Wu <yinchen@uchicago.edu>
 
-import numpy as np
-# import matplotlib.pyplot as plt
-# import random
-# from arch import arch_model
-import pandas as pd
 import math
-# import pmdarima as pm
-# from pmdarima import model_selection
-# import os
-# import dis
-# import statistics
-# from sklearn import metrics
-# import sklearn
-from tsfresh import extract_features
-
-from statsmodels.tsa.seasonal import seasonal_decompose
-
-# import itertools
-# import functools
-import warnings
 from builtins import range
-# from collections import defaultdict
 
-
+import numpy as np
+import pandas as pd
 from numpy.linalg import LinAlgError
-# from scipy.signal import cwt, find_peaks_cwt, ricker, welch
-# from scipy.stats import linregress
-# from statsmodels.tools.sm_exceptions import MissingDataError
-
-with warnings.catch_warnings():
-    # Ignore warnings of the patsy package
-    warnings.simplefilter("ignore", DeprecationWarning)
-
-    from statsmodels.tsa.ar_model import AR
-# from statsmodels.tsa.stattools import acf, adfuller, pacf
-
-from hurst import compute_Hc
 
 class Window:
     """ The  class for rolling window feature mapping.
@@ -77,6 +46,13 @@ class tf_Stat:
         self.step = step
         self.detector = None
     def convert(self, X):
+        try:
+            from tsfresh import extract_features
+        except ImportError as exc:
+            raise ImportError(
+                "tsfresh is required for tf_Stat; install with `theseus[feature-extraction]`."
+            ) from exc
+
         window = self.window
         step = self.step
         pos = math.ceil(window/2)
@@ -124,6 +100,14 @@ class Stat:
         
         
     def convert(self, X):
+        try:
+            from statsmodels.tsa.seasonal import seasonal_decompose
+        except ImportError as exc:
+            raise ImportError(
+                "statsmodels is required for Stat feature extraction; install with "
+                "`theseus[feature-extraction]`."
+            ) from exc
+
         freq = self.freq
         n = self.window
         data_step = self.data_step
@@ -167,7 +151,7 @@ class Stat:
         x9 = df.apply(self.entropy_function, axis =1, result_type='expand')
         
         #seasonality
-        result = seasonal_decompose(X, model='additive', freq = freq, extrapolate_trend='freq')
+        result = seasonal_decompose(X, model='additive', period=freq, extrapolate_trend='freq')
         #seasonal
         x10 = pd.Series(np.array(result.seasonal[math.ceil(n/2) : - math.floor(n/2)]))
         #trend 
@@ -218,8 +202,14 @@ class Stat:
 
             if k not in calculated_ar_params:
                 try:
-                    calculated_AR = AR(x_as_list)
-                    calculated_ar_params[k] = calculated_AR.fit(maxlag=k, solver="mle").params
+                    from statsmodels.tsa.ar_model import AutoReg
+
+                    try:
+                        calculated_AR = AutoReg(x_as_list, lags=k, old_names=False).fit()
+                    except TypeError:
+                        calculated_AR = AutoReg(x_as_list, lags=k).fit()
+
+                    calculated_ar_params[k] = calculated_AR.params
                 except (LinAlgError, ValueError):
                     calculated_ar_params[k] = [np.NaN] * k
 
@@ -356,5 +346,13 @@ class Stat:
         # Return SampEn
         return -np.log(A / B)
     def hurst_f(self, x):
-        H,c, M = compute_Hc(x)
+        try:
+            from hurst import compute_Hc
+        except ImportError as exc:
+            raise ImportError(
+                "hurst is required for Stat feature extraction; install with "
+                "`theseus[feature-extraction]`."
+            ) from exc
+
+        H, c, _ = compute_Hc(x)
         return [H, c]
