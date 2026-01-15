@@ -261,7 +261,7 @@ class Garch:
                 from arch import arch_model
             except ImportError as exc:
                 raise ImportError(
-                    "arch is required for the Garch distance measure; install with `theseus[garch]`."
+                    "arch is required for the Garch distance measure; install with `theseusplus[garch]`."
                 ) from exc
 
             self.n_initial_ = self.detector.n_initial_
@@ -643,7 +643,7 @@ class EDRS:
                 from arch import arch_model
             except ImportError as exc:
                 raise ImportError(
-                    "arch is required for EDRS with `vol=True`; install with `theseus[garch]`."
+                    "arch is required for EDRS with `vol=True`; install with `theseusplus[garch]`."
                 ) from exc
 
             model = arch_model(10 * residual, mean='Constant', vol='garch', p=1, q=1)

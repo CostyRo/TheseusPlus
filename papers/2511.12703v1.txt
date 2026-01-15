@@ -1,0 +1,364 @@
+
+--- page 1 ---
+Change-Point Detection Utilizing Normalized 
+Entropy as a Fundamental Metric 
+ 
+1st Qingqing Song 
+Faculty of Applied Mathematics and Computer 
+Science 
+Belarusian State University 
+Minsk, Belarus 
+fpm.sunC@bsu.by 
+ 
+2nd Shaoliang Xia 
+Faculty of Applied Mathematics and Computer 
+Science 
+Belarusian State University 
+Minsk, Belarus 
+fpm.sya@bsu.by
+ 
+Abstract – This paper introduces a concept for change -point 
+detection based on normalized entropy as a fundamental metric, 
+aiming to overcome the dependence of traditional entropy 
+methods on assumptions about data distribution and absolute 
+scales. Normalized entropy maps entropy values to the [0,1] 
+interval through standardization, accurately capturing relative 
+changes in data complexity. By utilizing a sliding window to 
+compute normalized entropy, this approach transforms the 
+challenge of detecting change points in c omplex time series —
+arising from variations in scale, distribution, and diversity—into 
+the task of identifying significant features within the normalized 
+entropy sequence, thereby avoiding interference from 
+parametric assumptions and effectively highlightin g 
+distributional shifts. Experimental results show that normalized 
+entropy exhibits significant numerical fluctuation characteristics 
+and patterns near change points across various distributions and 
+parameter combinations. The average deviation between 
+fluctuation moments and actual change points is only 2.4% of the 
+sliding window size, demonstrating strong adaptability.  This 
+paper provides theoretical support for change -point detection in 
+complex data environments and lays a methodological 
+foundation for precise and automated detection based on 
+normalized entropy as a fundamental metric. 
+Keywords – Change Point Detection, Normalized Entropy, Time 
+Series Analysis. 
+I. INTRODUCTION 
+Change-point detection is a critical data analysis technique 
+used to identify moments of significant statistical changes in 
+time series or high -dimensional data  [1], with broad 
+applications in signal processing, financial analysis, industrial 
+monitoring, and load analysis [2,3]. Common methods include 
+statistical tests, model -based approaches, and information -
+theoretic techniques. 
+This paper focuses on entropy -based metrics within 
+information theory for change -point detection. Entropy, 
+introduced by Claude Shannon, measures the uncertainty or 
+information content of a discrete random variable [ 4]. Recent 
+advancements in this field include Sofronov et al. (2012), who 
+applied cross-entropy to sequence change-point problems [5], 
+and Unakafov and Keller (2018), who proposed a method 
+based on conditional entropy of sequence patterns, effective in 
+detecting structural changes but limited in pure level shifts [6]. 
+Ma (2024) developed a non -parametric multivariate change -
+point detection method using copula entropy, achieving single 
+and multiple change-point detection through two-sample tests 
+and a binary segmentation strategy, with strong performance 
+on simulated and real-world data [7]. 
+This paper aims to introduce normalized entropy theory, 
+design specific computational methods, and preliminarily 
+validate the feasibility of using normalized entropy as a 
+fundamental metric for change -point detection, while testing 
+its applicability to mul ti-change-point detection on both 
+simulated and real datasets. 
+II. UTILIZING NORMALIZED ENTROPY AS A FUNDAMENTAL 
+METRIC 
+A. Problem Statement  
+One of the core challenges in change-point detection lies in its 
+reliance on assumptions about data distribution and specific 
+numerical parameters. Many existing methods require pre -
+defined thresholds 𝜏, significance levels α, or assumptions that 
+data follow specific distributions 𝑃(𝑥), such as Gaussian or 
+Poisson distributions [ 8, 9]. This dependency limits 
+adaptability, as real -world time series often exhibit complex 
+and diverse distributions that cannot be fully captured by a 
+single assumption. Moreover, improper parameter settings can 
+lead to biased results or reduced robustness. 
+For entropy-based change-point detection, the computation of 
+entropy 𝐻(𝑋) typically assumes that the data distribution is 
+known or can be estimated. However, in high -dimensional or 
+nonlinear data, such assumptions may fail, causing entropy 
+values to deviate from the true complexity. Furthermore, 
+entropy changes are often defined as follows: 
+∆𝐻 = 𝐻(𝑋𝑡+1) − 𝐻(𝑋𝑡) (1) 
+The threshold setting ∆𝐻 > 𝜏 often directly determines the 
+outcome of change -point detection. If the threshold is set too 
+high, it may lead to missed detections, while overly low 
+thresholds can result in excessive false positives. These issues 
+highlight that, despite the theoretical advantages of entropy in 
+change-point detection, its practical application remains 
+constrained by parameter selection and distributional 
+assumptions. Designing robust, distribution-free change-point 
+
+--- page 2 ---
+detection methods remains a key research challenge in this 
+field. 
+B. Eliminating Dependence on Absolute Entropy Scale  
+The normalized entropy method addresses the dependence of 
+traditional entropy metrics on absolute entropy scales, 
+significantly improving adaptability and robustness in change-
+point detection. In classical entropy calculations, the value of 
+𝐻(𝑋) is directly influenced by the range, dimensionality, and 
+scale of data. For datasets of varying sizes or time series with 
+different dynamic ranges, entropy values may become difficult 
+to compare due to absolute differences in data characteristics, 
+making change-point detection results dependent on specific 
+entropy scales. 
+Normalized entropy introduces a standardization factor to map 
+entropy values to a unified range (typically [0,1]), providing a 
+more accurate representation of the relative complexity or 
+uncertainty of data. Formally, normalized entropy can be 
+expressed as: 
+𝐻𝑛𝑜𝑟𝑚(X) = H(X)
+𝐻𝑚𝑎𝑥
+ (2) 
+Here, H(X) represents the original entropy value, and 𝐻𝑚𝑎𝑥 
+denotes the maximum possible entropy, typically determined 
+by the theoretical maximum complexity of the data. This 
+normalization ensures that entropy changes are no longer 
+dependent on absolute data scales but are instead driven solely 
+by variations in da ta patterns, making it more suitable for 
+diverse and non-uniform data environments. 
+C. Approach and Algorithms 
+To convert continuous data into discrete probability 
+distributions, binning is required. Given a sample dataset X =
+{𝑥1, 𝑥2, ⋯ , 𝑥𝑛}, where 𝑛 is the sample size and the data range 
+is [ 𝑥𝑚𝑎𝑥 ,  𝑥𝑚𝑖𝑛 ], the data is divided into 𝑘  equal-width 
+intervals, with each interval width calculated as: 
+∆= 𝑥𝑚𝑎𝑥 − 𝑥𝑚𝑖𝑛
+𝑘  (3) 
+The interval boundaries are: 
+BinEdges = {𝑥𝑚𝑖𝑛, 𝑥𝑚𝑖𝑛 + ∆, 𝑥𝑚𝑖𝑛 + 2∆, ⋯ , 𝑥𝑚𝑎𝑥 } (4) 
+For each interval 𝐼𝑗 = [𝑥𝑚𝑖𝑛 + (𝑗 − 1)Δ, 𝑥𝑚𝑖𝑛 + 𝑗Δ)  ( j =
+1,2, ⋯ , k − 1 , with the last interval as the closed interval 
+[𝑥𝑚𝑖𝑛 + (k − 1)Δ, 𝑥𝑚𝑎𝑥]), the number of data points X falling 
+into each interval 𝑓𝑗 is counted. 
+𝑓𝑗 = |{𝑥𝑖 ∈ 𝑋|𝑥𝑖 ∈ 𝐼𝑗}| (5) 
+Here, ∣⋅∣ denotes the cardinality of the set (i.e., the number of 
+data points). The frequency 𝑓𝑗  for each interval is then 
+converted into probability 𝑝𝑗: 
+𝑝𝑗 = 𝑓𝑗
+𝑛  , 𝑗 = 1, 2, ⋯ , 𝑘 (6) 
+The probability distribution satisfies the normalization 
+condition: ∑ 𝑝𝑗
+𝑘
+𝑗=1 = 1. 
+Based on the probability distribution {𝑝1, 𝑝2, ⋯ , 𝑝𝑘} , the 
+entropy H(X) can be calculated using the formula: 
+𝐻(𝑋) = − ∑ 𝑝𝑗 𝑙𝑜𝑔𝑏 𝑝𝑗
+𝑛
+𝑗=1
+ (7) 
+The maximum entropy 𝐻𝑚𝑎𝑥  corresponds to a uniform 
+distribution, where all interval probabilities are equal, 𝑝𝑗 =
+1
+𝑘  , 𝑗 = 1, 2, ⋯ , 𝑘. Substituting the uniform distribution into the 
+entropy formula yields the maximum entropy: 
+𝐻𝑚𝑎𝑥 = log𝑏 𝑘  (8) 
+Normalized entropy is defined by standardizing H(X) to the 
+range [0, 1] as: 
+𝐻𝑛𝑜𝑟𝑚(𝑋) = 𝐻(𝑋)
+𝐻𝑚𝑎𝑥
+=
+− ∑ 𝑝𝑗 𝑙𝑜𝑔𝑏 𝑝𝑗
+𝑘
+𝑗=1
+𝑙𝑜𝑔𝑏 𝑘  (9) 
+To ensure normalized entropy captures local rather than global 
+characteristics, a sliding window mechanism is introduced. 
+With a window size of 𝛿 and a step size of 1, the input data 
+sequence X = {𝑥1, 𝑥2, ⋯ , 𝑥𝑇 }, where 𝑇 is the total number of 
+data points, is processed. For calculating normalized entropy 
+at 𝑥𝑇, the data within the window is: 
+𝑋𝑡 = {𝑥𝑡−𝛿+1, 𝑥𝑡−𝛿+2, ⋯ , 𝑥𝑡}, 𝑡 ≥ 𝛿 (10) 
+For each window 𝑋𝑡 , its normalized entropy 𝐻𝑛𝑜𝑟𝑚(𝑋𝑡) ∈
+[0, 1] is computed. 
+All normalized entropy values are recorded as the sequence 𝐻. 
+𝐻 = {𝐻𝑛𝑜𝑟𝑚(𝑋𝛿), 𝐻𝑛𝑜𝑟𝑚(𝑋𝛿+1), ⋯ , 𝐻𝑛𝑜𝑟𝑚(𝑋𝑇)} (11) 
+III. EXPERIMENTS AND VALIDATION 
+This paper uses disk read -write monitoring sequences from a 
+web server as an example of performance time series data to 
+visualize the correlation between normalized entropy and the 
+original data. (Algorithm parameters: 𝛿 = 70, 𝑘 = ln 𝛿) 
+ 
+Fig. 1. Normalized Entropy and Original Sequence Comparison on 
+Measured Data 
+ 
+As shown in Fig. 1, the comparison between the normalized 
+entropy sequence and the original sequence clearly reveals 
+
+
+--- page 3 ---
+significant local fluctuations in normalized entropy near 
+change points, reflecting abrupt shifts in data complexity or 
+uncertainty.  
+To further validate the clarity and stability of normalized 
+entropy in characterizing change points, this paper conducts 
+experiments using simulated data, generating time series with 
+random combinations of varying lengths, parameters, and 
+distributions as input. (Algorithm parameters: 𝛿 = 100, 𝑘 =
+𝑙𝑛 𝛿)  
+ 
+Fig. 2. Normalized Entropy and Original Sequence Comparison on 
+Simulated Data 
+ 
+The validation results are shown in Fig. 2, which presents a 
+time series composed of six combinations with varying levels 
+of differences and distributions, along with their 
+corresponding normalized entropy sequences. The original 
+data exhibits significant shifts in numerical levels at five 
+change points, while the normalized entropy sequence shows 
+distinct fluctuations near these points, accurately aligning with 
+the timing of abru pt changes in data distribution, as 
+demonstrated in Table 1. 
+TABLE 1. CHANGE POINT AND NORMALIZED ENTROPY 
+RESPONSE CHARACTERISTICS WITH ERROR ANALYSIS 
+Change 
+point 
+(time) 
+Normalized 
+Entropy Response 
+Point (time) 
+Response 
+Duration Error 
+357 359 98 2 
+912 914 98 2 
+1312 1316 93 4 
+1617 1619 98 2 
+1841 1843 98 2 
+ 
+According to Table 1, the average deviation between the 
+fluctuation moments of the normalized entropy sequence and 
+the actual change points is only 2.4% of the sliding window 
+size, with the response duration close to the window size. 
+Near change points, the normalized entropy sequence typically 
+forms prominent peaks or valleys, which can be characterized 
+by local extrema, such as defining the peak of normalized 
+entropy as: 
+𝐻𝑝𝑒𝑎𝑘 = max
+𝑡∈[𝑡−𝛿,𝑡+𝛿]
+𝐻𝑛𝑜𝑟𝑚 (𝑋𝑡) (12) 
+Here, 𝛿 represents the window size around the change point. 
+These peak or valley features further validate the effectiveness 
+of normalized entropy in change -point detection, accurately 
+reflecting the locations of abrupt distribution changes and 
+providing theoreti cal support for precise change -point 
+localization. 
+IV. DISCUSSION AND FUTURE RESEARCH DIRECTIONS 
+While the application of normalized entropy in change -point 
+detection demonstrates theoretical advantages, its practical 
+computation involves significant overhead. This paper 
+employs a sliding window approach with a step size of 1, 
+requiring the recalculation of normalized entropy for each time 
+point, which increases computational complexity. 
+Additionally, the choice of window size can impact both 
+efficiency and detection accuracy. Optimizing the window 
+mechanism or improving the algorithm to reduce 
+computational costs is a key challenge for practical 
+applications. 
+Future research could focus on clarifying the specific 
+relationship between normalized entropy and change points 
+and designing algorithms for precise localization. This paper 
+highlights the distinct fluctuations of normalized entropy near 
+change points but  does not propose a concrete detection 
+process. Observations suggest that these fluctuations often 
+exhibit unique features, potentially containing rich pattern 
+information. Further studies could analyze the local statistical 
+properties of normalized entropy sequences to extract change-
+point characteristics. Methods like wavelet transform [ 10] or 
+Fourier transform [11] could be applied to perform frequency-
+domain analysis of normalized entropy sequences, capturing 
+characteristic frequencies or energy distributions near change 
+points. Combining the dynamic behavior of normalized 
+entropy with mathematical models or machi ne learning 
+algorithms to establish automated change -point detection 
+mechanisms is another important direction. Moreover, 
+exploring alternative  metrics with lower computational 
+complexity, such as the DUID metric discussed in TRLLD  
+[12], to quantify the uniformity of sample distribution density, 
+offers a promising research avenue.  Integrating sequential 
+analysis methods and their related variants in time series is 
+expected to address computational cost  and real -time issues 
+while improving the accuracy and efficiency of change -point 
+detection [13]. 
+ 
+ 
+
+
+--- page 4 ---
+V. CONCLUSION 
+This paper proposes using normalized entropy as a 
+fundamental metric for change -point detection to overcome 
+the dependence of traditional entropy methods on data 
+distribution assumptions and absolute scales. By standardizing 
+entropy values, normalized entr opy more accurately reflects 
+relative complexity changes in data patterns, eliminating scale 
+effects and providing theoretical support for change -point 
+detection in diverse data environments. Methodologically, 
+normalized entropy is computed via a sliding w indow, 
+mapping entropy values to the [0,1] range, and characterizing 
+significant fluctuations near change points through local 
+extrema. This approach avoids interference from parametric 
+assumptions and highlights abrupt changes in data 
+distributions. Exper iments demonstrate that normalized 
+entropy reliably captures change points across various 
+distributions and parameter combinations, showing strong 
+robustness and adaptability. Its distinct fluctuations near 
+change points effectively represent abrupt shifts  in data 
+distributions, validating its effectiveness as a fundamental 
+metric for change -point detection. Future research will focus 
+on precise localization of change points, defining detection 
+processes, and refining the practical theoretical framework 
+based on normalized entropy.  
+ACKNOWLEDGMENT  
+The authors wish to express their sincere appreciation to Professor 
+Kharin Aleksey Y. for sharing his insights on change-point detection 
+theory during his lecture, which greatly inspired this work. 
+REFERENCES 
+[1] S. Aminikhanghahi and D. J. Cook, “A survey of methods for time 
+series change point detection,” Knowl. Inf. Syst., vol. 51, no. 2, pp. 
+339–367, 2017. 
+[2] X. Bao, L. Chen, J. Zhong, D. Wu, and Y. Zheng, “A self -
+supervised contrastive change point detection method for industrial 
+time series,” Eng. Appl. Artif. Intell., vol. 133, 2024, Art. no. 108217. 
+[3] Q. Song, Z. Wu, and S. Xia, “Node load rate calculation method 
+based on database query statistics in load balancing strategy,” in 2024 
+Asia-Pacific Conference on Image Processing, Electronics and 
+Computers (IPEC), 2024, pp. 408–412. IEEE. 
+[4] A. Rényi, “On measures of entropy and information,” in Proc. 
+Fourth Berkeley S ymp. Math. Stat. Probab., vol. 4 , 1961, pp. 547 –
+562. University of California Press. 
+[5] G. Sofronov, T. Polushina, and M. Priyadarshana, “Sequential 
+change-point detection via the cross-entropy method,” in 11th Symp. 
+Neural Network Appl. Electrical Eng., 2012, pp. 185–188. IEEE. 
+[6] A. M. Unakafov and K. Keller, “Change-point detection using the 
+conditional entropy of ordinal patterns,” Entropy, vol. 20, no. 9, Art. 
+no. 709, 2018. 
+[7] J. Ma, “Change point detection with copula entropy based two -
+sample test,” arXiv preprint arXiv:2403.07892, 2024. 
+[8] R. Baranowski, Y. Chen, and P. Fryzlewicz, “Narrowest -over-
+threshold detection of multiple change points and change -point-like 
+features,” J. Roy. Stat. Soc. Ser. B: Stat. Methodol., vol. 81, no. 3, pp. 
+649–672, 2019. 
+[9] P. Fryzlewicz, “Wild binary segmentation for multiple change -
+point detection,” 2014. 
+[10] D. Zhang, “Wavelet transform,” in Fundamentals of Image Data 
+Mining: Analysis, Features, Classification and Retrieval, Cham: 
+Springer International Publishing, 2019, pp. 35–44. 
+[11] S. Bochner and K. Chandrasekharan, Fourier Transforms, no. 19. 
+Princeton University Press, 1949. 
+[12] Q. Song, S. Xia, and Z. Wu, “TRLLD: Load level detection 
+algorithm based on threshold recognition for load time series,” 
+Comput. Mater. Continua, vol. 83, no. 2, 2025. 
+[13] A. Kharin and T. T. Tu, “Performance and robustness analysis 
+of sequential hypotheses testing for time series with trend,” Austrian 
+J. Stat., vol. 46, no. 3-4, pp. 23–36, 2017. 

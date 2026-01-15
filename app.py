@@ -7,12 +7,12 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objs as go
-from dash import DiskcacheManager, Input, Output, State, dash_table, dcc, html
+from dash import Input, Output, State, dash_table, dcc, html
 
 from layout_tools import *
 from navbar import *
-from src.analysis.score_computation import generate_data
 from src.utils.metrics import metricor
+from src.utils.slidingWindows import find_length
 
 external_stylesheets = [
 	{
@@ -28,19 +28,26 @@ external_stylesheets = [
 	dbc.themes.BOOTSTRAP,
 ]
 
-import diskcache
-cache = diskcache.Cache("./cache")
-background_callback_manager = DiskcacheManager(cache)
+background_callback_manager = None
+try:
+	import diskcache
+	from dash import DiskcacheManager
 
+	cache = diskcache.Cache("./cache")
+	background_callback_manager = DiskcacheManager(cache)
+except ImportError:
+	pass
 
-app = dash.Dash(
-	__name__,
-	meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1.0"}],
-	external_stylesheets=external_stylesheets,
-	background_callback_manager=background_callback_manager,
-	suppress_callback_exceptions=True,
-	title="TheseusPlus",
-)
+dash_kwargs = {
+	"meta_tags": [{"name": "viewport", "content": "width=device-width, initial-scale=1.0"}],
+	"external_stylesheets": external_stylesheets,
+	"suppress_callback_exceptions": True,
+	"title": "TheseusPlus",
+}
+if background_callback_manager is not None:
+	dash_kwargs["background_callback_manager"] = background_callback_manager
+
+app = dash.Dash(__name__, **dash_kwargs)
 
 
 @lru_cache(maxsize=None)
@@ -82,6 +89,109 @@ def _normalize_scores(scores):
 	return (scores - scores.min()) / denom
 
 
+NECPD_METHODS = {
+	"NECPD70": 70,
+	"NECPD100": 100,
+}
+ARIMA_METHOD = "ARIMA"
+ARIMA_ORDER = (1, 1, 1)
+NECPD_DATA_ROOT = os.path.join("data", "new_algs")
+_NECPD_MEASURES = (
+	"AUC_ROC",
+	"AUC_PR",
+	"Precision",
+	"Recall",
+	"F",
+	"Precision@k",
+	"Rprecision",
+	"Rrecall",
+	"RF",
+)
+_NECPD_MEASURE_IDX = {name: idx for idx, name in enumerate(_NECPD_MEASURES)}
+
+
+def _necpd_score_zip_path(method_name, folder, ts_name):
+	return os.path.join(NECPD_DATA_ROOT, method_name, "scores", folder, "score", f"{ts_name}.zip")
+
+
+@lru_cache(maxsize=None)
+def _load_necpd_metrics_map(method_name):
+	metrics_path = os.path.join(NECPD_DATA_ROOT, method_name, "metrics.csv")
+	if not os.path.isfile(metrics_path):
+		return {}
+	try:
+		df_ne = pd.read_csv(metrics_path)
+	except Exception:
+		return {}
+	if "dataset" not in df_ne.columns or "filename" not in df_ne.columns:
+		return {}
+
+	available_measures = [m for m in _NECPD_MEASURES if m in df_ne.columns]
+	df_ne = df_ne[["dataset", "filename"] + available_measures]
+
+	out = {}
+	for row in df_ne.to_dict("records"):
+		dataset = str(row.get("dataset"))
+		filename = str(row.get("filename"))
+		out[(dataset, filename)] = tuple(row.get(m, np.nan) for m in _NECPD_MEASURES)
+	return out
+
+
+@lru_cache(maxsize=4096)
+def _necpd_metrics(ts_zip_path, window):
+	if not os.path.isfile(ts_zip_path):
+		return (np.nan,) * len(_NECPD_MEASURES)
+
+	try:
+		ts = pd.read_csv(ts_zip_path, compression="zip", header=None).to_numpy()
+	except Exception:
+		return (np.nan,) * len(_NECPD_MEASURES)
+
+	if ts.size == 0:
+		return (np.nan,) * len(_NECPD_MEASURES)
+
+	label = np.asarray(ts[:, 1], dtype=int)
+	data = ts[:, 0].astype(float)
+	window = max(2, min(int(window), len(data)))
+
+	try:
+		from src.models.normalized_entropy_cpd import NormalizedEntropyCPD
+
+		clf = NormalizedEntropyCPD(window=window, bins="ln", score="delta")
+		clf.fit(data)
+		score = _normalize_scores(clf.decision_scores_)
+	except Exception:
+		return (np.nan,) * len(_NECPD_MEASURES)
+
+	if np.sum(label) in (0, len(label)):
+		return (np.nan,) * len(_NECPD_MEASURES)
+
+	metrics = [np.nan] * len(_NECPD_MEASURES)
+	grader = metricor()
+
+	try:
+		_, _, ap = grader.metric_PR(label, score)
+		metrics[_NECPD_MEASURE_IDX["AUC_PR"]] = float(ap)
+	except Exception:
+		pass
+
+	try:
+		L = grader.metric_new(label, score)
+		if L is not None:
+			metrics[_NECPD_MEASURE_IDX["AUC_ROC"]] = float(L[0])
+			metrics[_NECPD_MEASURE_IDX["Precision"]] = float(L[1])
+			metrics[_NECPD_MEASURE_IDX["Recall"]] = float(L[2])
+			metrics[_NECPD_MEASURE_IDX["F"]] = float(L[3])
+			metrics[_NECPD_MEASURE_IDX["Rrecall"]] = float(L[4])
+			metrics[_NECPD_MEASURE_IDX["Rprecision"]] = float(L[7])
+			metrics[_NECPD_MEASURE_IDX["RF"]] = float(L[8])
+			metrics[_NECPD_MEASURE_IDX["Precision@k"]] = float(L[9])
+	except Exception:
+		pass
+
+	return tuple(metrics)
+
+
 base_layout = html.Div([
 	dcc.Location(id="url"), 
 	sidebar, 
@@ -109,7 +219,15 @@ def render_page_content(pathname):
 	if pathname in ["/", "/page-1"]:
 		return generate_page_1()
 	elif pathname == "/page-2":
-		return generate_page_2(df)
+		title, fig, table_children = update_page1_overview_table("ALL", "AUC_PR", "ALL", "ALL")
+		return generate_page_2(
+			df,
+			measures="AUC_PR",
+			dataset="ALL",
+			title_children=title,
+			boxplot_figure=fig,
+			table_children=table_children,
+		)
 	elif pathname == "/page-3":
 		return generate_page_3(df)
 	elif pathname == "/page-4":
@@ -177,20 +295,78 @@ def update_page1_timeseries_graphs(active_cell,data_cell):
 		row = data_cell[active_cell['row']]
 		filename = row["filename"]
 		dataset_folder = df.loc[df["filename"] == filename]["dataset"].values[0]
-		_, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, filename)
+		folder, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, filename)
 
 		ts = pd.read_csv(ts_path + ".zip", compression="zip", header=None).to_numpy()
 
 		label = ts[:,1]
 		data = ts[:,0].astype(float)
-		x = list(range(len(data)))
+		orig_len = len(data)
+		data_min = float(np.min(data)) if orig_len else 0.0
+		data_max = float(np.max(data)) if orig_len else 0.0
+
+		plot_idx = None
+		if orig_len > LIMIT_POINT_TS:
+			base_idx = np.linspace(0, orig_len - 1, num=LIMIT_POINT_TS, dtype=int)
+			anom_idx = np.where(label == 1)[0]
+			extras = np.concatenate([anom_idx, anom_idx - 1, anom_idx + 1]) if len(anom_idx) else np.array([], dtype=int)
+			plot_idx = np.unique(np.concatenate([base_idx, extras]))
+			plot_idx = plot_idx[(plot_idx >= 0) & (plot_idx < orig_len)]
+			label = label[plot_idx]
+			data = data[plot_idx]
+			x = plot_idx.tolist()
+		else:
+			x = list(range(orig_len))
 
 		scores = {}
 		for method_name in methods_key:
 			score_zip = os.path.join(scores_dir, method_name, "score", ts_name) + ".zip"
 			if os.path.isfile(score_zip):
 				scores_tmp = pd.read_csv(score_zip, compression="zip", header=None).to_numpy()
-				scores[method_name] = scores_tmp[:,0].astype(float)
+				score_vec = scores_tmp[:,0].astype(float)
+				if plot_idx is not None and len(score_vec) == orig_len:
+					score_vec = score_vec[plot_idx]
+				scores[method_name] = score_vec
+
+		for necpd_method, necpd_window in NECPD_METHODS.items():
+			necpd_zip = _necpd_score_zip_path(necpd_method, folder, ts_name)
+			if os.path.isfile(necpd_zip):
+				scores_tmp = pd.read_csv(necpd_zip, compression="zip", header=None).to_numpy()
+				score_vec = scores_tmp[:, 0].astype(float)
+				if plot_idx is not None and len(score_vec) == orig_len:
+					score_vec = score_vec[plot_idx]
+				scores[necpd_method] = score_vec
+				continue
+
+			try:
+				from src.models.normalized_entropy_cpd import NormalizedEntropyCPD
+
+				window = max(2, min(int(necpd_window), len(data)))
+				clf = NormalizedEntropyCPD(window=window, bins="ln", score="delta")
+				clf.fit(data)
+				score_vec = _normalize_scores(clf.decision_scores_)
+				if plot_idx is not None and len(score_vec) == orig_len:
+					score_vec = score_vec[plot_idx]
+				scores[necpd_method] = score_vec
+			except Exception:
+				pass
+
+		arima_zip = _necpd_score_zip_path(ARIMA_METHOD, folder, ts_name)
+		if os.path.isfile(arima_zip):
+			scores_tmp = pd.read_csv(arima_zip, compression="zip", header=None).to_numpy()
+			score_vec = scores_tmp[:, 0].astype(float)
+			if plot_idx is not None and len(score_vec) == orig_len:
+				score_vec = score_vec[plot_idx]
+			scores[ARIMA_METHOD] = score_vec
+		elif len(data) <= 5000:
+			try:
+				from src.models.arima_cpd import ARIMACPD
+
+				clf = ARIMACPD(order=ARIMA_ORDER)
+				clf.fit(data)
+				scores[ARIMA_METHOD] = _normalize_scores(clf.decision_scores_)
+			except Exception:
+				pass
 		
 		
 
@@ -218,9 +394,11 @@ def update_page1_timeseries_graphs(active_cell,data_cell):
 		))
 
 		for method_name in scores.keys():
+			if len(scores[method_name]) != len(x):
+				continue
 			trace_scores.append(go.Scattergl(
 				x=x,
-				y=[0] + list(scores[method_name][1:-1]) + [0],
+				y=scores[method_name],
 				name = "{} score".format(method_name),
 				opacity = 1,
 				mode = 'lines',
@@ -236,26 +414,26 @@ def update_page1_timeseries_graphs(active_cell,data_cell):
 			),
 			yaxis2=dict(
 				domain=[0.45, 1],
-				range=[min(data),max(data)]
+				range=[data_min, data_max]
 			),
 			#showlegend=False,
-			title="{} time series snippet (40k points maximum)".format(filename.split(".")[0]),
+			title="{} time series snippet ({}k points maximum)".format(filename.split(".")[0], int(LIMIT_POINT_TS/1000)),
 			template="simple_white",
 			margin=dict(l=8, r=4, t=50, b=10),
 			height=375,
 			hovermode="x unified",
 			xaxis=dict(
-				range=[0,len(data)]
+				range=[0,orig_len]
 			)
 		)
 
 		fig = dict(data=trace_scores, layout=layout)
 
-		to_plot = pd.DataFrame(
-			{"method": methods_key, "value": [row[method_name] for method_name in methods_key]}
-		)
+		methods_bar = methods_key + list(NECPD_METHODS.keys()) + [ARIMA_METHOD]
+		to_plot = pd.DataFrame({"method": methods_bar, "value": [row.get(m) for m in methods_bar]})
+		to_plot["value"] = pd.to_numeric(to_plot["value"], errors="coerce")
 
-		fig_bar = px.bar(to_plot,x="method", y="value", labels={
+		fig_bar = px.bar(to_plot,x="method", y="value", category_orders={"method": methods_bar}, labels={
 					 "value": "{}".format('Accuracy'),
 					 "method": "{}".format('AD methods'),
 				 },title="{} on {} time series".format('Accuracy',filename.split(".")[0]))
@@ -272,24 +450,73 @@ def update_page1_timeseries_graphs(active_cell,data_cell):
 	[Input('dataset_select_page_1', 'value'),
 	Input('measure_select_page_1', 'value'),
 	Input('type_anom_select_page_1', 'value'),
-	Input('type_ts_select_page_1', 'value'),])
+	Input('type_ts_select_page_1', 'value'),],
+	prevent_initial_call=True,
+)
 def update_page1_overview_table(dataset,measure,anoma_type,ts_type):
-	df_new = _load_merged_table(measure) if measure is not None else df
+	measure_name = measure if measure is not None else "AUC_PR"
+	df_new = _load_merged_table(measure_name) if measure is not None else df
 	df_new = _filter_benchmark_df(df_new, dataset, anoma_type, ts_type)
-	df_new = df_new[['filename']+methods_key].round(3)
+
+	df_table = df_new[["filename"] + methods_key].copy()
+	necpd_idx = _NECPD_MEASURE_IDX.get(measure_name, 0)
+	extra_methods = list(NECPD_METHODS.keys()) + [ARIMA_METHOD]
+	precomputed_necpd = {m: _load_necpd_metrics_map(m) for m in extra_methods}
+	necpd_values = {m: [] for m in extra_methods}
+	for filename, dataset_folder in zip(df_new["filename"], df_new["dataset"]):
+		dataset_key = str(dataset_folder)
+		filename_key = str(filename)
+		for method_name in extra_methods:
+			pre = precomputed_necpd[method_name].get((dataset_key, filename_key))
+			necpd_values[method_name].append(pre[necpd_idx] if pre is not None else np.nan)
+
+	for method_name, values in necpd_values.items():
+		df_table[method_name] = values
+
+	methods_view = methods_key + extra_methods
+	df_table = df_table[["filename"] + methods_view].round(3)
 
 	if dataset is None: dataset = 'ALL'
 	if measure is None: measure = 'AUC_PR'
 	if anoma_type is None: anoma_type = 'ALL'
-	to_plot = df_new[methods_key]
+	to_plot = df_table[methods_view]
 	fig = px.box(to_plot[to_plot.median().sort_values(ascending=True).index],labels={
-					 "value": "{}".format(measure),
+					 "value": "{}".format(measure_name),
 					 "variable": "{}".format('AD methods'),
 				 },title="Average {} on {} time series ({})".format(measure,dataset,anoma_type))
 	fig.update_layout(showlegend=False,template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=375)
 	
 
-	return html.H5('{} for {} time series'.format(measure,len(df_new))),fig,[dash_table.DataTable(df_new.to_dict('records'), [{"name": i, "id": i} for i in df_new.columns],id='accuracy_tbl')]
+	return html.H5('{} for {} time series'.format(measure_name,len(df_table))),fig,[
+		dash_table.DataTable(
+			df_table.to_dict("records"),
+			[{"name": i, "id": i} for i in df_table.columns],
+			id="accuracy_tbl",
+			virtualization=True,
+			fixed_rows={"headers": True},
+			fill_width=False,
+			style_table={
+				"height": table_height,
+				"overflowY": "auto",
+				"overflowX": "auto",
+				"width": "100%",
+			},
+			style_cell={
+				"minWidth": "7rem",
+				"width": "7rem",
+				"maxWidth": "7rem",
+				"whiteSpace": "nowrap",
+			},
+			style_cell_conditional=[
+				{
+					"if": {"column_id": "filename"},
+					"minWidth": "16rem",
+					"width": "16rem",
+					"maxWidth": "16rem",
+				}
+			],
+		)
+	]
 
 
 ############################## page 2 ################################
@@ -307,13 +534,27 @@ def update_page2_comparison(methodX,methodY,dataset,measure,anoma_type,ts_type):
 	if methodX in (None, 'ALL') or methodY in (None, 'ALL'):
 		return None,None
 
-	df_new = _load_merged_table(measure) if measure is not None else df
+	measure_name = measure if measure is not None else "AUC_PR"
+
+	df_new = _load_merged_table(measure_name) if measure is not None else df
 	df_new = _filter_benchmark_df(df_new, dataset, anoma_type, ts_type)
 	df_new = df_new[['filename','dataset']+methods_key]
 
 	if dataset is None: dataset = 'ALL'
 	if measure is None: measure = 'AUC_PR'
 	if anoma_type is None: anoma_type = 'ALL'
+
+	necpd_needed = [m for m in (methodX, methodY) if m in NECPD_METHODS or m == ARIMA_METHOD]
+	if necpd_needed:
+		necpd_idx = _NECPD_MEASURE_IDX.get(measure_name, 0)
+		df_new = df_new.copy()
+		for method_name in dict.fromkeys(necpd_needed):
+			values = []
+			precomputed_necpd = _load_necpd_metrics_map(method_name)
+			for filename, dataset_folder in zip(df_new["filename"], df_new["dataset"]):
+				pre = precomputed_necpd.get((str(dataset_folder), str(filename)))
+				values.append(pre[necpd_idx] if pre is not None else np.nan)
+			df_new[method_name] = values
 
 	to_plot = df_new[[methodX,methodY,'dataset','filename']]
 	fig = px.box(to_plot[[methodX,methodY]],labels={
@@ -348,19 +589,73 @@ def update_page2_timeseries_on_click(clickData,methodX,methodY):
 
 	filename = clickData['points'][0]["hovertext"]
 	dataset_folder = df.loc[df['filename']==filename]['dataset'].values[0]
-	_, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, filename)
+	folder, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, filename)
 
 	ts = pd.read_csv(ts_path + ".zip",compression='zip', header=None).to_numpy()
 	label = ts[:,1]
 	data = ts[:,0].astype(float)
-	x = list(range(len(data)))
+	orig_len = len(data)
+	data_min = float(np.min(data)) if orig_len else 0.0
+	data_max = float(np.max(data)) if orig_len else 0.0
+
+	plot_idx = None
+	if orig_len > LIMIT_POINT_TS:
+		base_idx = np.linspace(0, orig_len - 1, num=LIMIT_POINT_TS, dtype=int)
+		anom_idx = np.where(label == 1)[0]
+		extras = np.concatenate([anom_idx, anom_idx - 1, anom_idx + 1]) if len(anom_idx) else np.array([], dtype=int)
+		plot_idx = np.unique(np.concatenate([base_idx, extras]))
+		plot_idx = plot_idx[(plot_idx >= 0) & (plot_idx < orig_len)]
+		label = label[plot_idx]
+		data = data[plot_idx]
+		x = plot_idx.tolist()
+	else:
+		x = list(range(orig_len))
 
 	scores = {}
 	for method_name in (methodX, methodY):
-		score_zip = os.path.join(scores_dir, method_name, "score", ts_name) + ".zip"
-		if os.path.isfile(score_zip):
-			scores_tmp = pd.read_csv(score_zip,compression='zip', header=None).to_numpy()
-			scores[method_name] = scores_tmp[:,0].astype(float)
+		if method_name in NECPD_METHODS:
+			necpd_zip = _necpd_score_zip_path(method_name, folder, ts_name)
+			if os.path.isfile(necpd_zip):
+				scores_tmp = pd.read_csv(necpd_zip, compression="zip", header=None).to_numpy()
+				score_vec = scores_tmp[:, 0].astype(float)
+				if plot_idx is not None and len(score_vec) == orig_len:
+					score_vec = score_vec[plot_idx]
+				scores[method_name] = score_vec
+			else:
+				try:
+					from src.models.normalized_entropy_cpd import NormalizedEntropyCPD
+
+					window = max(2, min(int(NECPD_METHODS[method_name]), len(data)))
+					clf = NormalizedEntropyCPD(window=window, bins="ln", score="delta")
+					clf.fit(data)
+					scores[method_name] = _normalize_scores(clf.decision_scores_)
+				except Exception:
+					pass
+		elif method_name == ARIMA_METHOD:
+			arima_zip = _necpd_score_zip_path(method_name, folder, ts_name)
+			if os.path.isfile(arima_zip):
+				scores_tmp = pd.read_csv(arima_zip, compression="zip", header=None).to_numpy()
+				score_vec = scores_tmp[:, 0].astype(float)
+				if plot_idx is not None and len(score_vec) == orig_len:
+					score_vec = score_vec[plot_idx]
+				scores[method_name] = score_vec
+			elif len(data) <= 5000:
+				try:
+					from src.models.arima_cpd import ARIMACPD
+
+					clf = ARIMACPD(order=ARIMA_ORDER)
+					clf.fit(data)
+					scores[method_name] = _normalize_scores(clf.decision_scores_)
+				except Exception:
+					pass
+		else:
+			score_zip = os.path.join(scores_dir, method_name, "score", ts_name) + ".zip"
+			if os.path.isfile(score_zip):
+				scores_tmp = pd.read_csv(score_zip,compression='zip', header=None).to_numpy()
+				score_vec = scores_tmp[:,0].astype(float)
+				if plot_idx is not None and len(score_vec) == orig_len:
+					score_vec = score_vec[plot_idx]
+				scores[method_name] = score_vec
 
 	anom = add_rect(label,data)
 	trace_scores = []
@@ -386,9 +681,11 @@ def update_page2_timeseries_on_click(clickData,methodX,methodY):
 	))
 
 	for method_name in scores.keys():
+		if len(scores[method_name]) != len(x):
+			continue
 		trace_scores.append(go.Scattergl(
 			x=x,
-			y=[0] + list(scores[method_name][1:-1]) + [0],
+			y=scores[method_name],
 			name = "{} score".format(method_name),
 			opacity = 1,
 			mode = 'lines',
@@ -402,15 +699,15 @@ def update_page2_timeseries_on_click(clickData,methodX,methodY):
 		),
 		yaxis2=dict(
 			domain=[0.45, 1],
-			range=[min(data),max(data)]
+			range=[data_min, data_max]
 		),
-		title="{} time series snippet (40k points maximum)".format(filename.split(".")[0]),
+		title="{} time series snippet ({}k points maximum)".format(filename.split(".")[0], int(LIMIT_POINT_TS/1000)),
 		template="simple_white",
 		margin=dict(l=8, r=4, t=50, b=10),
 		height=375,
 		hovermode="x unified",
 		xaxis=dict(
-			range=[0,len(data)]
+			range=[0,orig_len]
 		)
 	)
 
@@ -507,17 +804,44 @@ def generate_curve(grader,label,score,slidingWindow):
 def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom):
 	if (condition_custom is not None) and (time_series is not None) and (method is not None) and (exp is not None) and (plot_type is not None):
 		dataset_folder = df.loc[df['filename']==time_series]['dataset'].values[0]
-		_, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, time_series)
+		folder, ts_name, ts_path, scores_dir = _resolve_paths(dataset_folder, time_series)
 
 		ts = pd.read_csv(ts_path+ '.zip',compression='zip', header=None).to_numpy()
 		label = ts[:,1]
 		data = ts[:,0].astype(float)
 		x = list(range(len(data)))
 
-		score_zip = os.path.join(scores_dir, method, "score", ts_name) + ".zip"
-		scores = pd.read_csv(score_zip,compression='zip', header=None).to_numpy()[:,0].astype(float)
+		slidingWindow = find_length(data)
 
-		_, slidingWindow, *_ = generate_data(ts_path+ '.zip',0,max_length=10000)
+		if method in NECPD_METHODS:
+			necpd_zip = _necpd_score_zip_path(method, folder, ts_name)
+			if os.path.isfile(necpd_zip):
+				scores = pd.read_csv(necpd_zip, compression="zip", header=None).to_numpy()[:, 0].astype(float)
+			else:
+				from src.models.normalized_entropy_cpd import NormalizedEntropyCPD
+
+				window = max(2, min(int(NECPD_METHODS[method]), len(data)))
+				clf = NormalizedEntropyCPD(window=window, bins="ln", score="delta")
+				clf.fit(data)
+				scores = _normalize_scores(clf.decision_scores_)
+		elif method == ARIMA_METHOD:
+			arima_zip = _necpd_score_zip_path(method, folder, ts_name)
+			if os.path.isfile(arima_zip):
+				scores = pd.read_csv(arima_zip, compression="zip", header=None).to_numpy()[:, 0].astype(float)
+			elif len(data) <= 5000:
+				try:
+					from src.models.arima_cpd import ARIMACPD
+
+					clf = ARIMACPD(order=ARIMA_ORDER)
+					clf.fit(data)
+					scores = _normalize_scores(clf.decision_scores_)
+				except Exception:
+					return None, None, None
+			else:
+				return None, None, None
+		else:
+			score_zip = os.path.join(scores_dir, method, "score", ts_name) + ".zip"
+			scores = pd.read_csv(score_zip,compression='zip', header=None).to_numpy()[:,0].astype(float)
 
 		dict_acc = {
 				'R_AUC_ROC':      {},
@@ -713,4 +1037,4 @@ def update_graphs_page_measure(time_series,exp,plot_type,method,condition_custom
 	return None,None,None
 
 if __name__ == "__main__":
-	app.run(debug=True)
+	app.run(debug=False)

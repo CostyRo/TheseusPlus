@@ -11,7 +11,7 @@ import pandas as pd
 ################################# DATA #################################
 ########################################################################
 methods_key = ['IFOREST','LOF','MP','NORMA','IFOREST1','HBOS','OCSVM','PCA','AE','CNN','LSTM','POLY']
-methods_key_measures = ['IFOREST','LOF','MP','IFOREST1','HBOS','OCSVM','PCA','POLY']
+methods_key_measures = ['IFOREST','LOF','MP','IFOREST1','HBOS','OCSVM','PCA','POLY','NECPD70','NECPD100','ARIMA']
 measures_key = ['Precision@k','Precision','Recall','F','Rprecision','Rrecall','RF','AUC_ROC','AUC_PR']#,'R_AUC_ROC','R_AUC_PR','VUS_ROC','VUS_PR'
 
 path_top_dataseries = "data/benchmark_new/"
@@ -115,8 +115,8 @@ description = "Detection anomalies in time series have gained ample academic and
 	 \
 	This webpage is grouping all the results and the analysis made"
 
-footer_height = "4.5rem"
-sidebar_width = "20rem"
+footer_height = "3.25rem"
+sidebar_width = "14rem"
 table_height = "39rem"
 table_height_2 = "59rem"
 ts_height = "19rem"
@@ -154,7 +154,7 @@ FOOTER_STYLE = {
     "left": 0,
     "right": 0,
     "height": footer_height,
-    "padding": "0.5rem 1rem",
+    "padding": "0.25rem 1rem",
     "background-color": "rgb(55, 55, 55)",
 }
 
@@ -274,7 +274,10 @@ footer = html.Div(
 
 sidebar = html.Div(
 		[
-			html.H3("Anomaly Detection Benchmark", className="display-4"),
+			html.H5(
+				"Anomaly Detection Benchmark",
+				style={"fontSize": "1.1rem", "lineHeight": "1.2", "margin": 0},
+			),
 			html.Hr(),
 			html.H5('A comparison of {} anomaly detection methods with {} accuracy measures on {} time series'.format(len(methods_key),len(measures_key),len(df))),	
 			html.Hr(),
@@ -354,14 +357,14 @@ Type_ts_select_page_1 = dbc.Select(
 methodX_select_page_2 = dbc.Select(
     id="methodX_select_page_2",
     options=[{"label": "{}".format('ALL'), "value": "{}".format('ALL')}] +[
-        {"label": "{}".format(name), "value": "{}".format(name)} for name in methods_key
+        {"label": "{}".format(name), "value": "{}".format(name)} for name in (methods_key + ["NECPD70", "NECPD100", "ARIMA"])
     ],value='MP',
 )
 
 methodY_select_page_2 = dbc.Select(
     id="methodY_select_page_2",
     options=[{"label": "{}".format('ALL'), "value": "{}".format('ALL')}] +[
-        {"label": "{}".format(name), "value": "{}".format(name)} for name in methods_key
+        {"label": "{}".format(name), "value": "{}".format(name)} for name in (methods_key + ["NECPD70", "NECPD100", "ARIMA"])
     ],value='IFOREST',
 )
 

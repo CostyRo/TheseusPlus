@@ -71,6 +71,7 @@ def compute_score(methods,slidingWindow,data,X_data,data_train,data_test,X_train
     from src.models.ocsvm import OCSVM
     from src.models.pca import PCA
     from src.models.poly import POLY
+    from src.models.normalized_entropy_cpd import NormalizedEntropyCPD
 
     methods_scores = {}
     for method in methods:
@@ -135,6 +136,13 @@ def compute_score(methods,slidingWindow,data,X_data,data_train,data_test,X_train
             clf.fit(X_train_, X_test_)
             score = clf.decision_scores_
             score = np.array([score[0]]*math.ceil((slidingWindow-1)/2) + list(score) + [score[-1]]*((slidingWindow-1)//2))
+            score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
+
+        elif method in ('NECPD', 'NormalizedEntropyCPD'):
+            clf = NormalizedEntropyCPD(window=slidingWindow, bins="ln", score="delta")
+            x = data
+            clf.fit(x)
+            score = clf.decision_scores_
             score = MinMaxScaler(feature_range=(0,1)).fit_transform(score.reshape(-1,1)).ravel()
 
         methods_scores[method] = score

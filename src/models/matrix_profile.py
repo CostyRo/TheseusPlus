@@ -22,7 +22,7 @@ class MatrixProfile:
             import stumpy
         except ImportError as exc:
             raise ImportError(
-                "stumpy is required for MatrixProfile; install with `theseus[matrix-profile]`."
+                "stumpy is required for MatrixProfile; install with `theseusplus[matrix-profile]`."
             ) from exc
 
         X = np.asarray(X, dtype=float)

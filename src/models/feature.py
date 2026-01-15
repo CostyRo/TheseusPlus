@@ -50,7 +50,7 @@ class tf_Stat:
             from tsfresh import extract_features
         except ImportError as exc:
             raise ImportError(
-                "tsfresh is required for tf_Stat; install with `theseus[feature-extraction]`."
+                "tsfresh is required for tf_Stat; install with `theseusplus[feature-extraction]`."
             ) from exc
 
         window = self.window
@@ -105,7 +105,7 @@ class Stat:
         except ImportError as exc:
             raise ImportError(
                 "statsmodels is required for Stat feature extraction; install with "
-                "`theseus[feature-extraction]`."
+                "`theseusplus[feature-extraction]`."
             ) from exc
 
         freq = self.freq
@@ -351,7 +351,7 @@ class Stat:
         except ImportError as exc:
             raise ImportError(
                 "hurst is required for Stat feature extraction; install with "
-                "`theseus[feature-extraction]`."
+                "`theseusplus[feature-extraction]`."
             ) from exc
 
         H, c, _ = compute_Hc(x)

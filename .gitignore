@@ -9,6 +9,7 @@ __pycache__/
 cache.db
 cache.db-shm
 cache.db-wal
+cache/
 
 .DS_Store
 

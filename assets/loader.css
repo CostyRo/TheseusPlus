@@ -76,3 +76,8 @@ div:first-of-type.trig_loader + div.loader .loader_circle {
       background-color: #f8f9fa !important;
       color: #212529 !important;
 }
+
+/* Dash DataTable: keep horizontal scrollbar usable */
+.dash-table-container .dash-spreadsheet-container {
+  overflow-x: auto !important;
+}

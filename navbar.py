@@ -86,11 +86,54 @@ def generate_page_1():
 
 
 
-def generate_page_2(df_old,measures='AUC-ROC',dataset='ALL'):
+def generate_page_2(
+	df_old,
+	measures="AUC_PR",
+	dataset="ALL",
+	title_children=None,
+	boxplot_figure=None,
+	table_children=None,
+):
 	df_new = df_old[['filename']+methods_key]
 	df_new = df_new.round(3)
-	result_table = html.Div([dash_table.DataTable(df_new.to_dict('records'), [{"name": i, "id": i} for i in df_new.columns],id='accuracy_tbl')],id='div_table_page_1',#dbc.Table.from_dataframe(df[:200], striped=True, bordered=True, hover=True)],
-		style=CONTENT_STYLE_table)
+	if table_children is None:
+		table_children = [
+			dash_table.DataTable(
+				df_new.to_dict("records"),
+				[{"name": i, "id": i} for i in df_new.columns],
+				id="accuracy_tbl",
+				virtualization=True,
+				fixed_rows={"headers": True},
+				fill_width=False,
+				style_table={
+					"height": table_height,
+					"overflowY": "auto",
+					"overflowX": "auto",
+					"width": "100%",
+				},
+				style_cell={
+					"minWidth": "7rem",
+					"width": "7rem",
+					"maxWidth": "7rem",
+					"whiteSpace": "nowrap",
+				},
+				style_cell_conditional=[
+					{
+						"if": {"column_id": "filename"},
+						"minWidth": "16rem",
+						"width": "16rem",
+						"maxWidth": "16rem",
+					}
+				],
+			)
+		]
+
+	result_table = html.Div(
+		table_children,
+		id="div_table_page_1",
+		#dbc.Table.from_dataframe(df[:200], striped=True, bordered=True, hover=True)
+		style=CONTENT_STYLE_ts,
+	)
 	result_ts = html.Div([html.P("")],id='ts_place',
 		style=CONTENT_STYLE_ts)
 	stat_ts = html.Div([html.P("")],id='stat_ts_place',
@@ -98,13 +141,17 @@ def generate_page_2(df_old,measures='AUC-ROC',dataset='ALL'):
 	
 	to_plot = df_new[methods_key]
 	fig = px.box(to_plot[to_plot.median().sort_values(ascending=True).index],labels={
-                     "value": "{}".format(measures),
-                     "variable": "{}".format('AD methods'),
-                 },title="Average {} on {} time series".format(measures,dataset))
+                      "value": "{}".format(measures),
+                      "variable": "{}".format('AD methods'),
+                  },title="Average {} on {} time series".format(measures,dataset))
 	fig.update_layout(template="simple_white",margin=dict(l=8, r=4, t=50, b=10),height=375)
 
-	stat = dcc.Graph(figure=fig,id='boxplot_page_1')
-	title_table = html.Div(children=[html.H5('{} for {} time series'.format(measures,len(df_new)))],id='title_table')
+	stat = dcc.Graph(figure=boxplot_figure or fig, id="boxplot_page_1")
+	title_table = html.Div(
+		children=title_children
+		or html.H5("{} for {} time series".format(measures, len(df_new))),
+		id="title_table",
+	)
 	return html.Div([
 		dbc.Row([
 			dbc.Col([html.H1('Overall Benchmark Evaluation')],width=10),
@@ -151,7 +198,7 @@ def generate_page_2(df_old,measures='AUC-ROC',dataset='ALL'):
 				],width=3),
 			dbc.Col([
 				title_table,
-				result_table]),
+				result_table],width=9,style={"minWidth": 0}),
 			]),
 		html.Hr(),
 		dbc.Row([

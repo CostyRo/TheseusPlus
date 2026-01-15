@@ -577,11 +577,15 @@ def _get_sklearn_version():  # pragma: no cover
     """
 
     sklearn_version = str(sklearn.__version__)
-    if int(sklearn_version.split(".")[1]) < 19 or int(
-            sklearn_version.split(".")[1]) > 23:
-        raise ValueError("Sklearn version error")
+    parts = sklearn_version.split(".")
+    major = int(parts[0]) if parts else 0
+    minor = int(parts[1]) if len(parts) > 1 else 0
 
-    return int(sklearn_version.split(".")[1])
+    # Older code in this repo expects "0.xx" style version checks (e.g., > 20).
+    # Map sklearn 1.x+ to a value that keeps those comparisons working.
+    if major == 0:
+        return minor
+    return 100 + minor
 
 
 def _sklearn_version_21():  # pragma: no cover
